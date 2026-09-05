@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      selection_prompt:
+        description: Optional override for the selection instruction tail (the candidate list is always prepended)
+        required: false
+        type: string
 
 permissions:
    actions: write
@@ -15,12 +20,14 @@ permissions:
    pull-requests: write
 
 jobs:
-  run:
+  select:
     # ponytail: the agent-running claim label is never removed by these workflows, so issues that
     # fail, or succeed without closing, are permanently retired from selection; upgrade path is
     # unlabeling on completion/failure or timeout-based claims.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 120
+    outputs:
+      prompt: ${{ steps.pick.outputs.prompt }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
@@ -36,7 +43,10 @@ jobs:
         uses: ./.github/actions/setup-opencode
 
       - name: Pick issue and dispatch
+        id: pick
         shell: bash
+        env:
+          SELECTION_PROMPT: ${{ inputs.selection_prompt }}
         run: |
           set -Eeuo pipefail
 
@@ -61,13 +71,15 @@ jobs:
           printf 'Unclaimed candidate issues (newest first):\n'
           cat "$candidates"
 
+          default_tail='Choose the single issue that is most valuable and feasible to implement in one automated agent run (standing "never-close" meta tasks are fair game).
+          Reply with a prompt to implement this issue'
+          tail_instruction="${SELECTION_PROMPT:-$default_tail}"
+
           prompt="$RUNNER_TEMP/selection-prompt.txt"
           {
             printf '%s\n' 'Open issue candidates in this repository (number: title, newest first):'
             jq -r '.[] | "\(.number): \(.title)"' "$search_json"
-            printf '%s\n' \
-              'Choose the single issue that is most valuable and feasible to implement in one automated agent run (standing "never-close" meta tasks are fair game).' \
-              'Reply with a prompt to implement this issue'
+            printf '%s\n' "$tail_instruction"
           } > "$prompt"
 
           selection="$RUNNER_TEMP/selection.out"
@@ -76,5 +88,36 @@ jobs:
           selection_statuses=("${PIPESTATUS[@]}")
           set -e
           printf 'Model selection statuses: opencode=%s tee=%s\n' "${selection_statuses[0]}" "${selection_statuses[1]}"
+          if (( selection_statuses[0] != 0 || selection_statuses[1] != 0 )); then
+            printf 'Selection failed (opencode=%s tee=%s); not dispatching.\n' "${selection_statuses[0]}" "${selection_statuses[1]}" >&2
+            exit 1
+          fi
+          if ! grep -q '[^[:space:]]' "$selection"; then
+            printf '%s\n' 'Selection produced no output; not dispatching.' >&2
+            exit 1
+          fi
 
-          echo "$selection"
+          eof="EOF_PROMPT_$(date +%s)_$$_$RANDOM"
+          {
+            printf 'prompt<<%s\n' "$eof"
+            printf '%s\n' "$(< "$selection")"
+            printf '%s\n' "$eof"
+          } >> "$GITHUB_OUTPUT"
+
+          printf 'Implementation prompt:\n%s\n' "$(< "$selection")"
+
+  run:
+    needs: select
+    if: needs.select.outputs.prompt != ''
+    permissions:
+      actions: write
+      artifact-metadata: write
+      checks: read
+      packages: write
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/opencode.yml
+    with:
+      prompt: ${{ needs.select.outputs.prompt }}
+    secrets: inherit

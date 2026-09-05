@@ -11,6 +11,16 @@ on:
         description: Optional OpenCode model (for example, opencode-go-openai/glm-5.2)
         required: false
         type: string
+  workflow_call:
+    inputs:
+      prompt:
+        description: Task for OpenCode
+        required: true
+        type: string
+      model:
+        description: Optional OpenCode model (for example, opencode-go-openai/glm-5.2)
+        required: false
+        type: string
 
 permissions:
   actions: write
@@ -26,7 +36,7 @@ jobs:
     concurrency:
       group: opencode-agent
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
