@@ -269,7 +269,7 @@ jobs:
           stop_token="$(openssl rand -hex 8)"
           printf '::stop-commands::%s\n' "$stop_token"
           printf 'Coordinator prompt:\n%s\n' "$PROMPT"
-          printf '::stop-commands::%s\n' "$stop_token"
+          printf '::%s::\n' "$stop_token"
           set +e
           run_opencode run --agent coordinator --model "$model" --title "$coordinator_session_title" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
           coordinator_statuses=("${PIPESTATUS[@]}")
