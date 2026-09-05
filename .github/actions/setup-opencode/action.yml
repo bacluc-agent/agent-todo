@@ -83,14 +83,15 @@ runs:
         config = root / "opencode.jsonc"
         text = config.read_text()
         pattern = re.compile(
-            r'("opencode-go-(?:anthropic|openai)(?:-2)?"\s*:\s*\{.*?'
+            r'("opencode-go-(?:anthropic|openai)(-2)?"\s*:\s*\{.*?'
             r'"options"\s*:\s*\{)(.*?)(\}\s*,\s*"models")',
             re.DOTALL,
         )
-        text, count = pattern.subn(
-            r'\1\n        "apiKey": "{env:OPENCODE_GO_API_KEY}",\2\3',
-            text,
-        )
+        def add_api_key(match):
+            key = "OPENCODE_GO_2_API_KEY" if match.group(2) else "OPENCODE_GO_API_KEY"
+            return f'{match.group(1)}\n        "apiKey": "{{env:{key}}}",{match.group(3)}{match.group(4)}'
+
+        text, count = pattern.subn(add_api_key, text)
         if count != 4:
             raise SystemExit(f"Expected four OpenCode Go providers, found {count}")
         config.write_text(text)
