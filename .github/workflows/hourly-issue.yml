@@ -71,8 +71,9 @@ jobs:
           printf 'Unclaimed candidate issues (newest first):\n'
           cat "$candidates"
 
-          default_tail='Choose the single issue that is most valuable and feasible to implement in one automated agent run (standing "never-close" meta tasks are fair game).
-          Reply with a prompt to implement this issue'
+          default_tail='Consider EVERY candidate listed above. List position carries no signal: never default to the first or last item. Silently score each candidate on value and feasibility, think, then pick the single best issue for one automated agent run.
+          Priority: first finish work already in progress (issues referenced by open PRs or checks, or obviously partially done); then issues that unblock other issues or improve the runner/harness itself; then high-impact/low-risk fixes; then the rest. Deprioritize issues whose body targets a different repository unless all needed work is possible from this repository checkout via gh and remote PRs. Standing "never-close" meta tasks are fair game.
+          Reply with ONLY a prompt to implement the chosen issue: no preamble, no explanation, no quotes, no markdown fences; your raw reply is passed verbatim as the next agent run prompt.'
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
 
           prompt="$RUNNER_TEMP/selection-prompt.txt"
