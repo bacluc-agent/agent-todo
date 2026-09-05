@@ -33,8 +33,6 @@ permissions:
 
 jobs:
   run:
-    concurrency:
-      group: opencode-agent
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
