@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 120
     outputs:
       prompt: ${{ steps.pick.outputs.prompt }}
+      task-context: ${{ steps.pick.outputs.task-context }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
@@ -42,6 +43,8 @@ jobs:
 
       - name: Set up OpenCode
         uses: ./.github/actions/setup-opencode
+        with:
+          source-ref: fba0fd4dbebf9b1ca612792d76d756149e6be93b
 
       - name: Pick issue and dispatch
         id: pick
@@ -90,17 +93,8 @@ jobs:
           fi
           selection_model=''
           mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | awk '!seen[$0]++')
-          for candidate in \
-            'opencode-go-openai/qwen3.8-flash' \
-            'opencode-go-openai-2/qwen3.8-flash' \
-            "${free_models[@]}"; do
+          for candidate in "${free_models[@]}"; do
             case "$candidate" in
-              opencode-go-openai/qwen3.8-flash)
-                grep -Fxq "$candidate" "$available_models" && [[ -n "$OPENCODE_GO_API_KEY" ]] || continue
-                ;;
-              opencode-go-openai-2/qwen3.8-flash)
-                grep -Fxq "$candidate" "$available_models" && [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue
-                ;;
               opencode/*-free) ;;
               *) continue ;;
             esac
@@ -119,6 +113,26 @@ jobs:
               break
             fi
           done
+          if [[ -z "$selection_model" ]]; then
+            printf '%s\n' 'No verified free issue-selection model; checking paid Qwen bootstrap.' >&2
+            for candidate in 'opencode-go-openai/qwen3.8-flash' 'opencode-go-openai-2/qwen3.8-flash'; do
+              case "$candidate" in
+                opencode-go-openai/qwen3.8-flash) [[ -n "$OPENCODE_GO_API_KEY" ]] || continue ;;
+                opencode-go-openai-2/qwen3.8-flash) [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue ;;
+              esac
+              grep -Fxq "$candidate" "$available_models" || continue
+              probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
+              set +e
+              timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
+              probe_statuses=("${PIPESTATUS[@]}")
+              set -e
+              probe_text="$(< "$probe_output")"
+              if (( probe_statuses[0] == 0 && probe_statuses[1] == 0 )) && [[ "$probe_text" =~ ^[[:space:]]*OK\.?[[:space:]]*$ ]]; then
+                selection_model="$candidate"
+                break
+              fi
+            done
+          fi
           if [[ -z "$selection_model" ]]; then
             printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
             exit 1
@@ -164,6 +178,9 @@ jobs:
             printf 'prompt<<%s\n' "$eof"
             printf '%s\n' "$(< "$selection")"
             printf '%s\n' "$eof"
+            printf 'task-context<<%s\n' "$eof"
+            jq -cn --arg task "$(< "$selection")" '{phase:"coordinate", complexity:"medium", importance:"medium", risk:"medium", required_capabilities:["coding","shell"], runtime_constraints:["github-actions","bounded-time"], roles:["coordinator"], scope:["agent-todo repository"], task:$task, model_overrides:{}}'
+            printf '%s\n' "$eof"
           } >> "$GITHUB_OUTPUT"
 
           printf '%s\n' 'Implementation prompt:'
@@ -183,4 +200,5 @@ jobs:
     uses: ./.github/workflows/opencode.yml
     with:
       prompt: ${{ needs.select.outputs.prompt }}
+      task-context: ${{ needs.select.outputs.task-context }}
     secrets: inherit
