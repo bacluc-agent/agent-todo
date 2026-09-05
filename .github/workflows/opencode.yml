@@ -102,7 +102,7 @@ jobs:
             probe_status=${statuses[0]}
             tee_status=${statuses[1]}
             printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$tee_status"
-            ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" == OK ]]
+            ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
           }
 
           available_models="$RUNNER_TEMP/opencode-models.out"
