@@ -196,12 +196,25 @@ jobs:
 
           requested = sys.argv[1]
           available = [line.strip() for line in open(sys.argv[2]) if line.strip()]
+          aliases = {
+              "qwen-3.8-flash": "opencode-go-openai/qwen3.8-flash",
+          }
 
           if requested in available:
               print(f"available\t{requested}")
               raise SystemExit
 
           if "/" not in requested:
+              alias = aliases.get(requested)
+              if alias is not None:
+                  matches = [model for model in available if model == alias]
+                  if len(matches) == 1:
+                      print(f"available\t{matches[0]}")
+                      raise SystemExit
+                  if len(matches) > 1:
+                      print(f"ambiguous\t{','.join(matches)}")
+                      raise SystemExit
+
               normalized = re.sub(r"[^a-z0-9]", "", requested.lower())
               matches = [
                   model for model in available
