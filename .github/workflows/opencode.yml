@@ -144,11 +144,27 @@ jobs:
         env:
           PROMPT: ${{ inputs.prompt }}
           REQUESTED_MODEL: ${{ inputs.model }}
+          BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
           printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
+          copilot_auth_content=''
+          if [[ -n "${BACLUC_AGENT_GITHUB_TOKEN:-}" ]]; then
+            printf '::add-mask::%s\n' "$BACLUC_AGENT_GITHUB_TOKEN"
+            copilot_auth_content="$(python3 -c 'import json, sys; token = sys.stdin.read().rstrip(); print(json.dumps({"github-copilot": {"type": "oauth", "refresh": token, "access": token}}, separators=(",", ":")))' <<<"$BACLUC_AGENT_GITHUB_TOKEN")"
+            printf '::add-mask::%s\n' "$copilot_auth_content"
+          fi
+
+          run_opencode() {
+            if [[ -n "$copilot_auth_content" ]]; then
+              OPENCODE_AUTH_CONTENT="$copilot_auth_content" opencode "$@"
+            else
+              opencode "$@"
+            fi
+          }
+
           printf '%s\n' 'Model selection reasoning: use the requested model unchanged when provided; otherwise discover an available coordinator model.'
           model="${REQUESTED_MODEL:-}"
           if [[ -z "$model" ]]; then
@@ -156,7 +172,7 @@ jobs:
             printf '%s\n' 'Model detection command: opencode run --agent model-discovery [prompt omitted]'
             printf '%s\n' 'Model detection prompt/reasoning: select one configured OpenCode Go model suitable for this task and return it as the coordinator carrier.'
             set +e
-            opencode run --agent model-discovery "$PROMPT" 2>&1 | tee "$discovery_output"
+            run_opencode run --agent model-discovery "$PROMPT" 2>&1 | tee "$discovery_output"
             discovery_statuses=("${PIPESTATUS[@]}")
             discovery_status=${discovery_statuses[0]}
             discovery_tee_status=${discovery_statuses[1]}
@@ -181,7 +197,7 @@ jobs:
           available_models="$RUNNER_TEMP/opencode-models.out"
           printf '%s\n' 'Model availability command: opencode models'
           set +e
-          opencode models 2>&1 | tee "$available_models"
+          run_opencode models 2>&1 | tee "$available_models"
           available_statuses=("${PIPESTATUS[@]}")
           available_command_status=${available_statuses[0]}
           available_tee_status=${available_statuses[1]}
@@ -263,7 +279,7 @@ jobs:
 
           printf 'Final coordinator command: opencode run --agent coordinator --model %q [prompt omitted]\n' "$model"
           set +e
-          opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
+          run_opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
           coordinator_statuses=("${PIPESTATUS[@]}")
           coordinator_status=${coordinator_statuses[0]}
           coordinator_tee_status=${coordinator_statuses[1]}
