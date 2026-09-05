@@ -34,7 +34,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install OpenCode
-        run: npm install --global opencode-ai
+        run: npm install --global opencode-ai@1.18.18
 
       - name: Fetch and prepare OpenCode configuration
         id: config
