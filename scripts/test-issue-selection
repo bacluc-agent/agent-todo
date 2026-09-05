@@ -25,7 +25,7 @@ run_selection() {
   done
   local prompt
   prompt="$(printf '%s\n%s%s' 'Open issue candidates in this repository (number: title, oldest first):' "$candidates" "$tail_instruction")"
-  opencode run --agent issue-selector --model "$model" "$prompt" > "$out"
+  timeout 10m opencode run --agent issue-selector --model "$model" "$prompt" > "$out"
 }
 
 check_output() {
