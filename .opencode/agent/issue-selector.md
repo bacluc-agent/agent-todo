@@ -4,6 +4,13 @@ mode: primary
 temperature: 0.1
 permission:
   "*": deny
+  read: allow
+  glob: allow
+  grep: allow
+  webfetch: allow
+  bash:
+    "*": deny
+    "gh *": allow
 ---
 
 # Issue Selector Agent
@@ -14,6 +21,6 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 ## Constraints
 
-- Reason only: you have no tools, shell, files, or subagents, and must not simulate having them
-- The candidate list and selection rules in the user message are your complete input
+- Read-only research: you can read files, search, fetch URLs, and run gh commands, but you cannot modify files or spawn subagents
+- Use gh or webfetch to look up issue details, repository context, and docs when the candidate list alone is not enough
 - Your reply is forwarded verbatim as a downstream prompt: include nothing but the final implementation prompt
