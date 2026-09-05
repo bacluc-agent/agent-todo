@@ -1,0 +1,102 @@
+name: Hourly issue runner
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+   actions: write
+   artifact-metadata: write
+   checks: read
+   packages: write
+   contents: write
+   issues: write
+   pull-requests: write
+
+jobs:
+  run:
+    # ponytail: the agent-running claim label is never removed by these workflows, so issues that
+    # fail, or succeed without closing, are permanently retired from selection; upgrade path is
+    # unlabeling on completion/failure or timeout-based claims.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: bacluc-agent/agent-todo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up OpenCode
+        uses: ./.github/actions/setup-opencode
+
+      - name: Pick issue and dispatch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          printf '::add-mask::%s\n' "$GITHUB_TOKEN"
+          printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
+
+          gh label create agent-running -R "$GITHUB_REPOSITORY" \
+            --color 0E8A16 --description 'Selected by the hourly issue runner' --force
+
+          # gh issue list -S returns nothing for no:label:<name> (gh client filter); the search API works.
+          # Results are capped at the 50 newest unclaimed issues, so "oldest" below means oldest of that page.
+          search_json="$RUNNER_TEMP/candidates.json"
+          gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:open+is:issue+no:label:agent-running+sort:created-desc&per_page=50" \
+            --jq '.items' > "$search_json"
+
+          candidates="$RUNNER_TEMP/candidate-numbers.txt"
+          jq -r '.[].number | tostring' "$search_json" > "$candidates"
+          if [[ ! -s "$candidates" ]]; then
+            printf '%s\n' 'No unclaimed open issues; nothing to do.'
+            exit 0
+          fi
+          printf 'Unclaimed candidate issues (newest first):\n'
+          cat "$candidates"
+
+          prompt="$RUNNER_TEMP/selection-prompt.txt"
+          {
+            printf '%s\n' 'Open issue candidates in this repository (number: title, newest first):'
+            jq -r '.[] | "\(.number): \(.title)"' "$search_json"
+            printf '%s\n' \
+              'Choose the single issue that is most valuable and feasible to implement in one automated agent run (standing "never-close" meta tasks are fair game).' \
+              'Reply with ONLY the issue number and nothing else.'
+          } > "$prompt"
+
+          selection="$RUNNER_TEMP/selection.out"
+          set +e
+          opencode run --model 'opencode-go-openai/qwen3.8-flash' "$(< "$prompt")" 2>&1 | tee "$selection"
+          selection_statuses=("${PIPESTATUS[@]}")
+          set -e
+          printf 'Model selection statuses: opencode=%s tee=%s\n' "${selection_statuses[0]}" "${selection_statuses[1]}"
+
+          # Only whole standalone-number lines count, so prose or model ids like qwen3.8-flash
+          # cannot fake a pick; a failed run never reports "model chose".
+          selected=''
+          if ((${selection_statuses[0]} == 0)); then
+            while IFS= read -r token; do
+              if grep -qxF "$token" "$candidates"; then
+                selected="$token"
+                break
+              fi
+            done < <(sed -nE 's/^[[:space:]]*([0-9]+)[[:space:]]*$/\1/p' "$selection")
+          fi
+          if [[ -z "$selected" ]]; then
+            selected="$(tail -n 1 "$candidates")"
+            printf 'Issue selection: no candidate picked from model output; falling back to oldest listed issue %s\n' "$selected"
+          else
+            printf 'Issue selection: model chose issue %s\n' "$selected"
+          fi
+
+          if ! gh issue edit "$selected" -R "$GITHUB_REPOSITORY" --add-label agent-running; then
+            printf 'Warning: unable to claim issue %s; dispatching anyway\n' "$selected" >&2
+          fi
+
+          title="$(gh issue view "$selected" -R "$GITHUB_REPOSITORY" --json title -q .title)"

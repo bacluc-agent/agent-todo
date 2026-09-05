@@ -1,0 +1,108 @@
+name: Set up OpenCode
+description: >-
+  Installs the OpenCode CLI and prepares the shared OpenCode configuration
+  from the provision-machines repository. Relies on the job-level
+  GITHUB_TOKEN and OPENCODE_GO_API_KEY env vars set by the caller.
+runs:
+  using: composite
+  steps:
+  - name: Install OpenCode
+    shell: bash
+    run: npm install --global opencode-ai@1.18.18
+
+  - name: Fetch and prepare OpenCode configuration
+    id: config
+    shell: bash
+    env:
+      SOURCE_REPOSITORY: https://github.com/bacluc/provision-machines.git
+      CONFIG_PATH: deploys/development_tools/ai_agent_devcontainer/files/opencode
+    run: |
+      set -Eeuo pipefail
+
+      printf '::add-mask::%s\n' "$GITHUB_TOKEN"
+      printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
+      if [[ -z "${OPENCODE_GO_API_KEY:-}" ]]; then
+        printf '%s\n' 'Missing required repository secret: OPENCODE_GO_API_KEY' >&2
+        exit 1
+      fi
+
+      source_dir="$RUNNER_TEMP/provision-machines"
+      config_dir="$RUNNER_TEMP/opencode-config"
+      mapfile -t tags < <(git ls-remote --tags "$SOURCE_REPOSITORY" \
+        | awk '$2 !~ /\^\{\}$/ { sub("refs/tags/", "", $2); print $2 }' \
+        | grep -E '^[vV]?[0-9]+([.][0-9]+){1,2}([-.][0-9A-Za-z.-]+)?$' \
+        | sort -V)
+
+      if ((${#tags[@]} == 0)); then
+        printf '%s\n' 'No semver tags found in the source repository' >&2
+        exit 1
+      fi
+
+      tag="${tags[${#tags[@]}-1]}"
+      tag_refs="$(git ls-remote --tags "$SOURCE_REPOSITORY" "refs/tags/$tag" "refs/tags/$tag^{}")"
+      tag_sha="$(printf '%s\n' "$tag_refs" | awk -v tag="$tag" \
+        '$2 == "refs/tags/" tag "^{}" { peeled=$1 } $2 == "refs/tags/" tag { direct=$1 } END { print peeled ? peeled : direct }')"
+      if [[ ! "$tag_sha" =~ ^[0-9a-f]{40}$ ]]; then
+        printf 'Unable to resolve source config tag to a commit: %s\n' "$tag" >&2
+        exit 1
+      fi
+      printf 'Using source config tag: %s (commit %s)\n' "$tag" "$tag_sha"
+      git clone --quiet "$SOURCE_REPOSITORY" "$source_dir"
+      git -C "$source_dir" checkout --quiet --detach "$tag_sha"
+      if [[ ! -d "$source_dir/$CONFIG_PATH" ]]; then
+        printf 'Missing OpenCode configuration directory: %s\n' "$CONFIG_PATH" >&2
+        exit 1
+      fi
+      rm -rf "$config_dir"
+      cp -a "$source_dir/$CONFIG_PATH" "$config_dir"
+
+      python3 - "$config_dir" <<'PY'
+      import pathlib
+      import re
+      import sys
+
+      root = pathlib.Path(sys.argv[1])
+      instruction = """
+
+      ## Agent progress and branches
+
+      Track progress in an issue in https://github.com/bacluc-agent/agent-todo. Use the assigned issue, or create one when none is assigned, and continue from that issue. Always push changes to a branch so work is not lost, and record the branch name in the issue.
+      """
+
+      for path in root.rglob("*"):
+          if path.is_file() and path.name.lower() in {"agents.md", "agent.md"} \
+                  and path.stem.lower() != "model-discovery":
+              path.write_text(path.read_text() + instruction)
+
+      config = root / "opencode.jsonc"
+      text = config.read_text()
+      pattern = re.compile(
+          r'("opencode-go-(?:anthropic|openai)(?:-2)?"\s*:\s*\{.*?'
+          r'"options"\s*:\s*\{)(.*?)(\}\s*,\s*"models")',
+          re.DOTALL,
+      )
+      text, count = pattern.subn(
+          r'\1\n        "apiKey": "{env:OPENCODE_GO_API_KEY}",\2\3',
+          text,
+      )
+      if count != 4:
+          raise SystemExit(f"Expected four OpenCode Go providers, found {count}")
+      config.write_text(text)
+
+      discovery = root / "agents" / "model-discovery.md"
+      if not discovery.exists():
+          discovery.write_text("""---
+      description: Selects an available model
+      mode: all
+      hidden: true
+      permission:
+        \"*\": allow
+      ---
+
+      Return one line exactly: `CARRIERS:` followed by one `coordinator: provider/model` entry. Choose an available OpenCode Go model suitable for the task, using the configured model catalog. Do not do the requested work or return any other text.
+      """)
+      PY
+
+      mkdir -p "$HOME/.config"
+      rm -rf "$HOME/.config/opencode"
+      cp -a "$config_dir" "$HOME/.config/opencode"
