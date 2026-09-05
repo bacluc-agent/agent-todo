@@ -2,7 +2,7 @@ name: Hourly issue runner
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       selection_prompt:
@@ -11,13 +11,13 @@ on:
         type: string
 
 permissions:
-   actions: write
-   artifact-metadata: write
-   checks: read
-   packages: write
-   contents: write
-   issues: write
-   pull-requests: write
+  actions: write
+  artifact-metadata: write
+  checks: read
+  packages: write
+  contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
   select:
