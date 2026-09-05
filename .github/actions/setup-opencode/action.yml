@@ -8,7 +8,6 @@ inputs:
   source-ref:
     description: Released provision-machines ref, or an explicitly requested development ref
     required: false
-    default: "9c46c1abc27d4f787f4312c9abb4c69a919a80f9"
 runs:
   using: composite
   steps:
