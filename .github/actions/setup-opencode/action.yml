@@ -2,7 +2,13 @@ name: Set up OpenCode
 description: >-
   Installs the OpenCode CLI and prepares the shared OpenCode configuration
   from the provision-machines repository. Relies on the job-level
-  GITHUB_TOKEN and at least one OPENCODE_GO API key env var set by the caller.
+  GITHUB_TOKEN set by the caller; paid fallback models additionally require an
+  OPENCODE_GO API key.
+inputs:
+  source-ref:
+    description: Released provision-machines ref, or an explicitly requested development ref
+    required: false
+    default: "1.5"
 runs:
   using: composite
   steps:
@@ -16,30 +22,16 @@ runs:
       env:
         SOURCE_REPOSITORY: https://github.com/bacluc/provision-machines.git
         CONFIG_PATH: deploys/development_tools/ai_agent_devcontainer/files/opencode
+        SOURCE_REF: ${{ inputs.source-ref }}
       run: |
         set -Eeuo pipefail
 
         printf '::add-mask::%s\n' "$GITHUB_TOKEN"
         printf '::add-mask::%s\n' "${OPENCODE_GO_API_KEY:-}"
         printf '::add-mask::%s\n' "${OPENCODE_GO_2_API_KEY:-}"
-        if [[ -z "${OPENCODE_GO_API_KEY:-}" && -z "${OPENCODE_GO_2_API_KEY:-}" ]]; then
-          printf '%s\n' 'Missing required repository secret: OPENCODE_GO_API_KEY or OPENCODE_GO_2_API_KEY' >&2
-          exit 1
-        fi
-
         source_dir="$RUNNER_TEMP/provision-machines"
         config_dir="$RUNNER_TEMP/opencode-config"
-        mapfile -t tags < <(git ls-remote --tags "$SOURCE_REPOSITORY" \
-          | awk '$2 !~ /\^\{\}$/ { sub("refs/tags/", "", $2); print $2 }' \
-          | grep -E '^[vV]?[0-9]+([.][0-9]+){1,2}([-.][0-9A-Za-z.-]+)?$' \
-          | sort -V)
-
-        if ((${#tags[@]} == 0)); then
-          printf '%s\n' 'No semver tags found in the source repository' >&2
-          exit 1
-        fi
-
-        tag="${tags[${#tags[@]}-1]}"
+        tag="$SOURCE_REF"
         tag_refs="$(git ls-remote --tags "$SOURCE_REPOSITORY" "refs/tags/$tag" "refs/tags/$tag^{}")"
         tag_sha="$(printf '%s\n' "$tag_refs" | awk -v tag="$tag" \
           '$2 == "refs/tags/" tag "^{}" { peeled=$1 } $2 == "refs/tags/" tag { direct=$1 } END { print peeled ? peeled : direct }')"
