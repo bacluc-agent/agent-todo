@@ -1,9 +1,6 @@
 Choose the single issue that is most valuable and feasible to implement in one automated agent run.
-Assess every candidate on the value implied by its title and on feasibility, and weigh candidates
-positioned early and late in the list equally: never default to the newest or the oldest candidate.
-Deprioritize issues that only touch this meta-repo's own docs or GitHub actions relative to issues
-whose fix lives in other repositories. Standing "never-close" meta tasks are fair game but must not
-starve other issues. Reason only; do not use tools, shell, files, or subagents. Reply with ONLY the
+Assess every candidate on the value implied by its title and on feasibility.
+Deprioritize issues that only touch this meta-repo's own docs sources. Standing "never-close" meta tasks are fair game but must not
+starve other issues. Reply with ONLY the
 final implementation prompt for the chosen issue: a self-contained instruction for a coding agent
-that names the chosen issue number, with no preamble, no reasoning, no transcript, and no markdown
-fences.
+that names the chosen issue number and how to implement it.
