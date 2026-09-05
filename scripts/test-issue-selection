@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Structural check for the hourly-issue selection prompt (issue #30): runs the real
+# tail instruction and agent through real opencode runs against synthetic candidate
+# lists and asserts the picks are single-issue, transcript-free, and not recency-biased.
+set -Eeuo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+model='opencode-go-openai/qwen3.8-flash'
+tail_instruction="$(cat scripts/issue-selection-tail.txt)"
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
+# Candidates as rendered by hourly-issue.yml: "number: title", oldest (lowest) first.
+# Fixture A: newest (30) is a trivial docs tweak, an older one (12) is a systemic fix.
+fixture_a=(5 "Document issue-label hygiene in AGENTS.md" 12 "Hourly runner silently drops dispatch when the GitHub API rate-limits" 30 "Fix typo in README intro")
+# Fixture B: newest (41) is itself a systemic fix.
+fixture_b=(20 "opencode.yml prompt input truncated above 100KB by the GITHUB_OUTPUT hand-off" 33 "Add a docs page describing the hourly runner" 41 "setup-opencode action must fail loudly when the config tag cannot be peeled")
+
+run_selection() {
+  local out="$1"
+  shift
+  local args=("$@") candidates="" i
+  for ((i = 0; i < ${#args[@]}; i += 2)); do
+    candidates+="${args[i]}: ${args[i + 1]}"$'\n'
+  done
+  local prompt
+  prompt="$(printf '%s\n%s%s' 'Open issue candidates in this repository (number: title, oldest first):' "$candidates" "$tail_instruction")"
+  timeout 10m opencode run --agent issue-selector --model "$model" "$prompt" > "$out"
+}
+
+check_output() {
+  local out="$1" label="$2"
+  if ! grep -q '[^[:space:]]' "$out"; then
+    printf 'FAIL [%s]: selection produced no output\n' "$label" >&2
+    return 1
+  fi
+  if grep -q $'\x1b' "$out"; then
+    printf 'FAIL [%s]: output contains ANSI escape codes\n' "$label" >&2
+    return 1
+  fi
+  if grep -qE '^(> |\$ )' "$out"; then
+    printf 'FAIL [%s]: output contains transcript/tool noise lines\n' "$label" >&2
+    cat "$out" >&2
+    return 1
+  fi
+}
+
+pick_of() {
+  local out="$1" label="$2"
+  shift 2
+  local found=() n
+  for n in "$@"; do
+    if grep -qE "(^|[^0-9])${n}([^0-9]|$)" "$out"; then
+      found+=("$n")
+    fi
+  done
+  if (( ${#found[@]} != 1 )); then
+    printf 'FAIL [%s]: expected exactly one candidate issue referenced, found: %s\n' \
+      "$label" "${found[*]:-none}" >&2
+    cat "$out" >&2
+    return 1
+  fi
+  printf '%s' "${found[0]}"
+}
+
+out_a="$workdir/selection-a.txt"
+out_b="$workdir/selection-b.txt"
+
+run_selection "$out_a" "${fixture_a[@]}"
+check_output "$out_a" A
+pick_a="$(pick_of "$out_a" A 5 12 30)"
+printf 'PASS [A]: pick is issue %s\n' "$pick_a"
+
+run_selection "$out_b" "${fixture_b[@]}"
+check_output "$out_b" B
+pick_b="$(pick_of "$out_b" B 20 33 41)"
+printf 'PASS [B]: pick is issue %s\n' "$pick_b"
+
+if (( pick_a == 30 )); then
+  printf 'FAIL: fixture A picked the trivial newest candidate (30) over the systemic fix (12)\n' >&2
+  exit 1
+fi
+
+printf 'OK: selection produced clean single-issue prompts without recency bias\n'

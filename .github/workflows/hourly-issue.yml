@@ -57,9 +57,10 @@ jobs:
             --color 0E8A16 --description 'Selected by the hourly issue runner' --force
 
           # gh issue list -S returns nothing for no:label:<name> (gh client filter); the search API works.
-          # Results are capped at the 50 newest unclaimed issues, so "oldest" below means oldest of that page.
+          # Oldest-first: the 50-item page keeps the OLDEST 50 unclaimed issues instead of the
+          # newest 50, so backlog items beyond the cap are the newest, not the oldest.
           search_json="$RUNNER_TEMP/candidates.json"
-          gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:open+is:issue+no:label:agent-running+sort:created-desc&per_page=50" \
+          gh api "search/issues?q=repo:${GITHUB_REPOSITORY}+is:open+is:issue+no:label:agent-running+sort:created-asc&per_page=50" \
             --jq '.items' > "$search_json"
 
           candidates="$RUNNER_TEMP/candidate-numbers.txt"
@@ -68,30 +69,32 @@ jobs:
             printf '%s\n' 'No unclaimed open issues; nothing to do.'
             exit 0
           fi
-          printf 'Unclaimed candidate issues (newest first):\n'
+          printf 'Unclaimed candidate issues (oldest first):\n'
           cat "$candidates"
 
-          default_tail='Choose the single issue that is most valuable and feasible to implement in one automated agent run (standing "never-close" meta tasks are fair game).
-          Reply with a prompt to implement this issue'
+          default_tail="$(cat scripts/issue-selection-tail.txt)"
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
 
           prompt="$RUNNER_TEMP/selection-prompt.txt"
           {
-            printf '%s\n' 'Open issue candidates in this repository (number: title, newest first):'
+            printf '%s\n' 'Open issue candidates in this repository (number: title, oldest first):'
             jq -r '.[] | "\(.number): \(.title)"' "$search_json"
             printf '%s\n' "$tail_instruction"
           } > "$prompt"
 
+          # opencode writes model text to stdout and the ANSI transcript (headers, tool calls) to stderr;
+          # keep stderr in the step log but forward only the stripped stdout as the implementation prompt.
           selection="$RUNNER_TEMP/selection.out"
           set +e
-          opencode run --model 'opencode-go-openai/qwen3.8-flash' "$(< "$prompt")" 2>&1 | tee "$selection"
-          selection_statuses=("${PIPESTATUS[@]}")
+          opencode run --agent issue-selector --model 'opencode-go-openai/qwen3.8-flash' "$(< "$prompt")" > "$selection"
+          selection_status=$?
           set -e
-          printf 'Model selection statuses: opencode=%s tee=%s\n' "${selection_statuses[0]}" "${selection_statuses[1]}"
-          if (( selection_statuses[0] != 0 || selection_statuses[1] != 0 )); then
-            printf 'Selection failed (opencode=%s tee=%s); not dispatching.\n' "${selection_statuses[0]}" "${selection_statuses[1]}" >&2
+          printf 'Model selection status: %s\n' "$selection_status"
+          if (( selection_status != 0 )); then
+            printf 'Selection failed (opencode=%s); not dispatching.\n' "$selection_status" >&2
             exit 1
           fi
+          sed -i 's/\x1b\[[0-9;]*[A-Za-z]//g' "$selection"
           if ! grep -q '[^[:space:]]' "$selection"; then
             printf '%s\n' 'Selection produced no output; not dispatching.' >&2
             exit 1
