@@ -165,8 +165,9 @@ jobs:
             discovery_output="$RUNNER_TEMP/model-discovery.out"
             printf '%s\n' 'Model detection command: opencode run --agent model-discovery [prompt omitted]'
             printf '%s\n' 'Model detection prompt/reasoning: select one configured OpenCode Go model suitable for this task and return it as the coordinator carrier.'
+            discovery_prompt="$(printf '%s\n\nUser task:\n%s' 'Run opencode models. Choose one listed opencode-go-* model suitable for the user task. Do not call APIs, read credentials, write files, edit repos, or do the task. Output exactly one line: CARRIERS: coordinator: provider/model' "$PROMPT")"
             set +e
-            run_opencode run --agent model-discovery "$PROMPT" 2>&1 | tee "$discovery_output"
+            run_opencode run --agent model-discovery "$discovery_prompt" 2>&1 | tee "$discovery_output"
             discovery_statuses=("${PIPESTATUS[@]}")
             discovery_status=${discovery_statuses[0]}
             discovery_tee_status=${discovery_statuses[1]}
