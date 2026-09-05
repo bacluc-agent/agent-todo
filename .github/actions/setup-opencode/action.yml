@@ -97,16 +97,7 @@ runs:
 
         discovery = root / "agents" / "model-discovery.md"
         if not discovery.exists():
-            discovery.write_text("""---
-        description: Selects an available model
-        mode: all
-        hidden: true
-        permission:
-          \"*\": allow
-        ---
-
-        Return one line exactly: `CARRIERS:` followed by one `coordinator: provider/model` entry. Choose an available OpenCode Go model suitable for the task, using the configured model catalog. Do not do the requested work or return any other text.
-        """)
+            raise SystemExit(f"Missing model-discovery agent file: {discovery}")
         PY
 
         mkdir -p "$HOME/.config"
