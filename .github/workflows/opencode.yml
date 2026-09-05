@@ -116,6 +116,11 @@ jobs:
             printf 'Model selection: preserving explicit model input: %q\n' "$model"
           fi
 
+          if [[ "$model" == github-copilot/* ]]; then
+            printf 'Model selection: rejecting unsupported Copilot model %q; using fallback %q\n' "$model" "$fallback_model"
+            model="$fallback_model"
+          fi
+
           available_models="$RUNNER_TEMP/opencode-models.out"
           printf '%s\n' 'Model availability command: opencode models'
           set +e
