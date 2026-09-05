@@ -55,6 +55,14 @@ jobs:
           printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
           printf '::add-mask::%s\n' "$OPENCODE_GO_2_API_KEY"
 
+          log_untrusted_file() {
+            local stop_token
+            stop_token="$(openssl rand -hex 32)"
+            printf '::stop-commands::%s\n' "$stop_token"
+            cat "$1"
+            printf '::%s::\n' "$stop_token"
+          }
+
           gh label create agent-running -R "$GITHUB_REPOSITORY" \
             --color 0E8A16 --description 'Selected by the hourly issue runner' --force
 
@@ -79,7 +87,7 @@ jobs:
           timeout 10m opencode models > "$available_models" 2>&1
           availability_status=$?
           set -e
-          cat "$available_models"
+          log_untrusted_file "$available_models"
           if (( availability_status != 0 )); then
             printf 'Unable to verify model availability; not dispatching.\n' >&2
             exit "$availability_status"
@@ -89,6 +97,10 @@ jobs:
             'opencode-go-openai/qwen3.8-flash' \
             'opencode-go-openai-2/qwen3.8-flash'; do
             if grep -Fxq "$candidate" "$available_models"; then
+              case "$candidate" in
+                opencode-go-openai/qwen3.8-flash) [[ -n "$OPENCODE_GO_API_KEY" ]] || continue ;;
+                opencode-go-openai-2/qwen3.8-flash) [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue ;;
+              esac
               selection_model="$candidate"
               break
             fi
@@ -112,10 +124,13 @@ jobs:
           # opencode writes model text to stdout and the ANSI transcript (headers, tool calls) to stderr;
           # keep stderr in the step log but forward only the stripped stdout as the implementation prompt.
           selection="$RUNNER_TEMP/selection.out"
+          selection_stop_token="$(openssl rand -hex 32)"
+          printf '::stop-commands::%s\n' "$selection_stop_token"
           set +e
           timeout 10m opencode run --agent issue-selector --model "$selection_model" "$(< "$prompt")" > "$selection"
           selection_status=$?
           set -e
+          printf '::%s::\n' "$selection_stop_token"
           printf 'Model selection status: %s\n' "$selection_status"
           if (( selection_status != 0 )); then
             printf 'Selection failed (opencode=%s); not dispatching.\n' "$selection_status" >&2
@@ -138,7 +153,8 @@ jobs:
             printf '%s\n' "$eof"
           } >> "$GITHUB_OUTPUT"
 
-          printf 'Implementation prompt:\n%s\n' "$(< "$selection")"
+          printf '%s\n' 'Implementation prompt:'
+          log_untrusted_file "$selection"
 
   run:
     needs: select
