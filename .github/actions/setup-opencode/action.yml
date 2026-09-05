@@ -8,7 +8,7 @@ inputs:
   source-ref:
     description: Released provision-machines ref, or an explicitly requested development ref
     required: false
-    default: "fba0fd4dbebf9b1ca612792d76d756149e6be93b"
+    default: ""
 runs:
   using: composite
   steps:
@@ -31,7 +31,19 @@ runs:
         printf '::add-mask::%s\n' "${OPENCODE_GO_2_API_KEY:-}"
         source_dir="$RUNNER_TEMP/provision-machines"
         config_dir="$RUNNER_TEMP/opencode-config"
-        tag="$SOURCE_REF"
+        if [[ -n "$SOURCE_REF" ]]; then
+          tag="$SOURCE_REF"
+        else
+          mapfile -t tags < <(git ls-remote --tags "$SOURCE_REPOSITORY" \
+            | awk '$2 !~ /\^\{\}$/ { sub("refs/tags/", "", $2); print $2 }' \
+            | grep -E '^[vV]?[0-9]+([.][0-9]+){1,2}([-.][0-9A-Za-z.-]+)?$' \
+            | sort -V)
+          if ((${#tags[@]} == 0)); then
+            printf '%s\n' 'No semver tags found in the source repository' >&2
+            exit 1
+          fi
+          tag="${tags[${#tags[@]}-1]}"
+        fi
         tag_refs="$(git ls-remote --tags "$SOURCE_REPOSITORY" "refs/tags/$tag" "refs/tags/$tag^{}")"
         tag_sha="$(printf '%s\n' "$tag_refs" | awk -v tag="$tag" \
           '$2 == "refs/tags/" tag "^{}" { peeled=$1 } $2 == "refs/tags/" tag { direct=$1 } END { print peeled ? peeled : direct }')"

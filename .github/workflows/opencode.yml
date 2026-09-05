@@ -59,9 +59,6 @@ jobs:
 
       - name: Set up OpenCode
         uses: ./.github/actions/setup-opencode
-        with:
-          source-ref: fba0fd4dbebf9b1ca612792d76d756149e6be93b
-
       - name: Select model and run coordinator
         shell: bash
         env:
