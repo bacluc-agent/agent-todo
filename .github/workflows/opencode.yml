@@ -1,0 +1,141 @@
+name: OpenCode agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Task for OpenCode
+        required: true
+        type: string
+      model:
+        description: Optional OpenCode model (for example, opencode-go-openai/glm-5.2)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+
+    steps:
+      - name: Check out target repository
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install OpenCode
+        run: npm install --global opencode-ai
+
+      - name: Fetch and prepare OpenCode configuration
+        id: config
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: https://github.com/bacluc/provision-machines.git
+          CONFIG_PATH: deploys/development_tools/ai_agent_devcontainer/files/opencode
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${OPENCODE_GO_API_KEY:-}" ]]; then
+            printf '%s\n' 'Missing required repository secret: OPENCODE_GO_API_KEY' >&2
+            exit 1
+          fi
+
+          source_dir="$RUNNER_TEMP/provision-machines"
+          config_dir="$RUNNER_TEMP/opencode-config"
+          mapfile -t tags < <(git ls-remote --tags "$SOURCE_REPOSITORY" \
+            | awk '$2 !~ /\^\{\}$/ { sub("refs/tags/", "", $2); print $2 }' \
+            | grep -E '^[vV]?[0-9]+([.][0-9]+){1,2}([-.][0-9A-Za-z.-]+)?$' \
+            | sort -V)
+
+          if ((${#tags[@]} == 0)); then
+            printf '%s\n' 'No semver tags found in the source repository' >&2
+            exit 1
+          fi
+
+          tag="${tags[${#tags[@]}-1]}"
+          printf 'Using source config tag: %s\n' "$tag"
+          git clone --quiet --depth 1 --branch "$tag" "$SOURCE_REPOSITORY" "$source_dir"
+          cp -a "$source_dir/$CONFIG_PATH" "$config_dir"
+
+          python3 - "$config_dir" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          instruction = """
+
+          ## Agent progress and branches
+
+          Track progress in an issue in https://github.com/bacluc-agent/agent-todo. Use the assigned issue, or create one when none is assigned, and continue from that issue. Always push changes to a branch so work is not lost, and record the branch name in the issue.
+          """
+
+          for path in root.rglob("*"):
+              if path.is_file() and path.name.lower() in {"agents.md", "agent.md"} \
+                      and path.stem.lower() != "model-discovery":
+                  path.write_text(path.read_text() + instruction)
+
+          config = root / "opencode.jsonc"
+          text = config.read_text()
+          pattern = re.compile(
+              r'("opencode-go-(?:anthropic|openai)(?:-2)?"\s*:\s*\{.*?'
+              r'"options"\s*:\s*\{)(.*?)(\}\s*,\s*"models")',
+              re.DOTALL,
+          )
+          text, count = pattern.subn(
+              r'\1\n        "apiKey": "{env:OPENCODE_GO_API_KEY}",\2\3',
+              text,
+          )
+          if count != 4:
+              raise SystemExit(f"Expected four OpenCode Go providers, found {count}")
+          config.write_text(text)
+
+          discovery = root / "agents" / "model-discovery.md"
+          if not discovery.exists():
+              discovery.write_text("""---
+          description: Selects an available model
+          mode: all
+          hidden: true
+          permission:
+            \"*\": allow
+          ---
+
+          Return one line exactly: `CARRIERS:` followed by one `coordinator: provider/model` entry. Choose an available OpenCode Go model suitable for the task, using the configured model catalog. Do not do the requested work or return any other text.
+          """)
+          PY
+
+          mkdir -p "$HOME/.config"
+          rm -rf "$HOME/.config/opencode"
+          cp -a "$config_dir" "$HOME/.config/opencode"
+
+      - name: Select model and run coordinator
+        shell: bash
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          REQUESTED_MODEL: ${{ inputs.model }}
+        run: |
+          set -Eeuo pipefail
+
+          model="$REQUESTED_MODEL"
+          if [[ -z "$model" ]]; then
+            discovery_output="$RUNNER_TEMP/model-discovery.out"
+            opencode run --agent model-discovery "$PROMPT" >"$discovery_output" 2>&1
+            model="$({ grep -oE 'coordinator: [^,[:space:]]+' "$discovery_output" || true; } | tail -n 1 | cut -d' ' -f2-)"
+          fi
+
+          if [[ -z "$model" ]]; then
+            printf '%s\n' 'Model input was empty and model-discovery returned no model' >&2
+            exit 1
+          fi
+
+          printf 'Running coordinator with model: %s\n' "$model"
+          opencode run --agent coordinator --model "$model" "$PROMPT"
