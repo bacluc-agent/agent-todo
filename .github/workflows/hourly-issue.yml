@@ -76,7 +76,7 @@ jobs:
 
           available_models="$RUNNER_TEMP/opencode-models.out"
           set +e
-          opencode models > "$available_models" 2>&1
+          timeout 10m opencode models > "$available_models" 2>&1
           availability_status=$?
           set -e
           cat "$available_models"
@@ -127,7 +127,11 @@ jobs:
             exit 1
           fi
 
-          eof="EOF_PROMPT_$(date +%s)_$$_$RANDOM"
+          eof="EOF_PROMPT_$(openssl rand -hex 32)"
+          if grep -Fqx -- "$eof" "$selection"; then
+            printf '%s\n' 'Selection output contained the output delimiter; not dispatching.' >&2
+            exit 1
+          fi
           {
             printf 'prompt<<%s\n' "$eof"
             printf '%s\n' "$(< "$selection")"
