@@ -57,6 +57,7 @@ jobs:
         env:
           PROMPT: ${{ inputs.prompt }}
           REQUESTED_MODEL: ${{ inputs.model }}
+          GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
           BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
