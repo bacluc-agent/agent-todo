@@ -67,7 +67,7 @@ jobs:
             jq -r '.[] | "\(.number): \(.title)"' "$search_json"
             printf '%s\n' \
               'Choose the single issue that is most valuable and feasible to implement in one automated agent run (standing "never-close" meta tasks are fair game).' \
-              'Reply with ONLY the issue number and nothing else.'
+              'Reply with a prompt to implement this issue'
           } > "$prompt"
 
           selection="$RUNNER_TEMP/selection.out"
@@ -77,26 +77,4 @@ jobs:
           set -e
           printf 'Model selection statuses: opencode=%s tee=%s\n' "${selection_statuses[0]}" "${selection_statuses[1]}"
 
-          # Only whole standalone-number lines count, so prose or model ids like qwen3.8-flash
-          # cannot fake a pick; a failed run never reports "model chose".
-          selected=''
-          if ((${selection_statuses[0]} == 0)); then
-            while IFS= read -r token; do
-              if grep -qxF "$token" "$candidates"; then
-                selected="$token"
-                break
-              fi
-            done < <(sed -nE 's/^[[:space:]]*([0-9]+)[[:space:]]*$/\1/p' "$selection")
-          fi
-          if [[ -z "$selected" ]]; then
-            selected="$(tail -n 1 "$candidates")"
-            printf 'Issue selection: no candidate picked from model output; falling back to oldest listed issue %s\n' "$selected"
-          else
-            printf 'Issue selection: model chose issue %s\n' "$selected"
-          fi
-
-          if ! gh issue edit "$selected" -R "$GITHUB_REPOSITORY" --add-label agent-running; then
-            printf 'Warning: unable to claim issue %s; dispatching anyway\n' "$selected" >&2
-          fi
-
-          title="$(gh issue view "$selected" -R "$GITHUB_REPOSITORY" --json title -q .title)"
+          echo "$selection"
