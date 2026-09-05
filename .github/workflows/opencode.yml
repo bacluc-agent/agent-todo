@@ -264,18 +264,22 @@ jobs:
             model="$fallback_resolved"
           fi
 
-          printf 'Final coordinator command: opencode run --agent coordinator --model %q\n' "$model"
+          coordinator_session_title='coordinator-run'
+          printf 'Final coordinator command: opencode run --agent coordinator --model %q --title %q\n' "$model" "$coordinator_session_title"
           stop_token="$(openssl rand -hex 8)"
           printf '::stop-commands::%s\n' "$stop_token"
           printf 'Coordinator prompt:\n%s\n' "$PROMPT"
           printf '::stop-commands::%s\n' "$stop_token"
           set +e
-          run_opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
+          run_opencode run --agent coordinator --model "$model" --title "$coordinator_session_title" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
           coordinator_statuses=("${PIPESTATUS[@]}")
           coordinator_status=${coordinator_statuses[0]}
           coordinator_tee_status=${coordinator_statuses[1]}
           set -e
           printf 'Coordinator statuses: opencode=%s tee=%s\n' "$coordinator_status" "$coordinator_tee_status"
+
+          # Dump subagent transcripts (issue #21)
+          COORDINATOR_SESSION_TITLE="$coordinator_session_title" OPENCODE_AUTH_CONTENT="$copilot_auth_content" python3 scripts/dump_subagent_transcripts.py || true
           if ((coordinator_status != 0)); then
             exit "$coordinator_status"
           fi
