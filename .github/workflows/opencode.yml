@@ -164,6 +164,36 @@ jobs:
             printf 'Model selection: preserving explicit model input: %q\n' "$model"
           fi
 
+          available_models="$RUNNER_TEMP/opencode-models.out"
+          printf '%s\n' 'Model availability command: opencode models'
+          set +e
+          opencode models 2>&1 | tee "$available_models"
+          available_statuses=("${PIPESTATUS[@]}")
+          available_command_status=${available_statuses[0]}
+          available_tee_status=${available_statuses[1]}
+          set -e
+          printf 'Model availability statuses: opencode=%s tee=%s\n' "$available_command_status" "$available_tee_status"
+          if ((available_tee_status != 0)); then
+            exit "$available_tee_status"
+          fi
+          if ((available_command_status != 0)); then
+            printf '%s\n' 'Unable to verify model availability: opencode models failed.' >&2
+            exit "$available_command_status"
+          fi
+
+          if grep -F -x -q -- "$model" "$available_models"; then
+            printf 'Model availability: selected %q is available\n' "$model"
+          else
+            printf 'Model availability: selected %q is unavailable\n' "$model"
+            model='qwen-3.8-flash'
+            printf 'Model fallback: using %q\n' "$model"
+            if ! grep -F -x -q -- "$model" "$available_models"; then
+              printf 'Model availability: fallback %q is unavailable; cannot run coordinator.\n' "$model" >&2
+              exit 1
+            fi
+            printf 'Model availability: fallback %q is available\n' "$model"
+          fi
+
           printf 'Final coordinator command: opencode run --agent coordinator --model %q [prompt omitted]\n' "$model"
           set +e
           opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
