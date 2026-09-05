@@ -102,6 +102,10 @@ jobs:
             probe_status=${statuses[0]}
             tee_status=${statuses[1]}
             printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$tee_status"
+            probe_text="$(sed $'s/\033\\[[0-9;]*[[:alpha:]]//g' "$probe_output")"
+            if ((probe_status == 0 && tee_status == 0)) && grep -Eq '^[[:space:]]*OK\.?[[:space:]]*$' <<<"$probe_text"; then
+              return 0
+            fi
             ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
           }
 
