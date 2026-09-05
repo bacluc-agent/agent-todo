@@ -89,6 +89,10 @@ jobs:
             exit "$availability_status"
           fi
           selection_model=''
+          probe_succeeded() {
+            local output="$1"
+            sed $'s/\033\[[0-9;]*[[:alpha:]]//g' "$output" | awk '/^[[:space:]]*OK\.?[[:space:]]*$/ { found=1 } END { exit !found }'
+          }
           mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | awk '!seen[$0]++')
           for candidate in "${free_models[@]}"; do
             case "$candidate" in
@@ -104,8 +108,7 @@ jobs:
             probe_status=${probe_statuses[0]}
             probe_tee_status=${probe_statuses[1]}
             printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$probe_tee_status"
-            probe_text="$(< "$probe_output")"
-            if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$probe_text" =~ ^[[:space:]]*OK\.?[[:space:]]*$ ]]; then
+            if (( probe_status == 0 && probe_tee_status == 0 )) && probe_succeeded "$probe_output"; then
               selection_model="$candidate"
               break
             fi
@@ -123,8 +126,7 @@ jobs:
               timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
               probe_statuses=("${PIPESTATUS[@]}")
               set -e
-              probe_text="$(< "$probe_output")"
-              if (( probe_statuses[0] == 0 && probe_statuses[1] == 0 )) && [[ "$probe_text" =~ ^[[:space:]]*OK\.?[[:space:]]*$ ]]; then
+              if (( probe_statuses[0] == 0 && probe_statuses[1] == 0 )) && probe_succeeded "$probe_output"; then
                 selection_model="$candidate"
                 break
               fi
