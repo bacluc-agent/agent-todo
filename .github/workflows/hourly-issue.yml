@@ -101,8 +101,10 @@ jobs:
                 opencode-go-openai/qwen3.8-flash) [[ -n "$OPENCODE_GO_API_KEY" ]] || continue ;;
                 opencode-go-openai-2/qwen3.8-flash) [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue ;;
               esac
-              selection_model="$candidate"
-              break
+              if timeout 45s opencode run --agent issue-selector --model "$candidate" 'Respond with OK.' >/dev/null 2>&1; then
+                selection_model="$candidate"
+                break
+              fi
             fi
           done
           if [[ -z "$selection_model" ]]; then
