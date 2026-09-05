@@ -89,27 +89,34 @@ jobs:
             exit "$availability_status"
           fi
           selection_model=''
+          mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | awk '!seen[$0]++')
           for candidate in \
             'opencode-go-openai/qwen3.8-flash' \
-            'opencode-go-openai-2/qwen3.8-flash'; do
-            if grep -Fxq "$candidate" "$available_models"; then
-              case "$candidate" in
-                opencode-go-openai/qwen3.8-flash) [[ -n "$OPENCODE_GO_API_KEY" ]] || continue ;;
-                opencode-go-openai-2/qwen3.8-flash) [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue ;;
-              esac
-              probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
-              printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q [prompt omitted]\n' "$RUNNER_TEMP" "$candidate"
-              set +e
-              timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
-              probe_statuses=("${PIPESTATUS[@]}")
-              set -e
-              probe_status=${probe_statuses[0]}
-              probe_tee_status=${probe_statuses[1]}
-              printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$probe_tee_status"
-              if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$(< "$probe_output")" == OK ]]; then
-                selection_model="$candidate"
-                break
-              fi
+            'opencode-go-openai-2/qwen3.8-flash' \
+            "${free_models[@]}"; do
+            case "$candidate" in
+              opencode-go-openai/qwen3.8-flash)
+                grep -Fxq "$candidate" "$available_models" && [[ -n "$OPENCODE_GO_API_KEY" ]] || continue
+                ;;
+              opencode-go-openai-2/qwen3.8-flash)
+                grep -Fxq "$candidate" "$available_models" && [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue
+                ;;
+              opencode/*-free) ;;
+              *) continue ;;
+            esac
+            probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
+            printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q [prompt omitted]\n' "$RUNNER_TEMP" "$candidate"
+            set +e
+            timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
+            probe_statuses=("${PIPESTATUS[@]}")
+            set -e
+            probe_status=${probe_statuses[0]}
+            probe_tee_status=${probe_statuses[1]}
+            printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$probe_tee_status"
+            probe_text="$(< "$probe_output")"
+            if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$probe_text" =~ ^[[:space:]]*OK\.?[[:space:]]*$ ]]; then
+              selection_model="$candidate"
+              break
             fi
           done
           if [[ -z "$selection_model" ]]; then

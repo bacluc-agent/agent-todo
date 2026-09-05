@@ -102,6 +102,10 @@ jobs:
             probe_status=${statuses[0]}
             tee_status=${statuses[1]}
             printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$tee_status"
+            probe_text="$(sed $'s/\033\\[[0-9;]*[[:alpha:]]//g' "$probe_output")"
+            if ((probe_status == 0 && tee_status == 0)) && grep -Eq '^[[:space:]]*OK\.?[[:space:]]*$' <<<"$probe_text"; then
+              return 0
+            fi
             ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
           }
 
@@ -123,6 +127,17 @@ jobs:
           fi
 
           fallback_model=''
+          mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models" | awk '!seen[$0]++')
+          for candidate in "${free_models[@]}"; do
+            if probe_model "$candidate"; then
+              fallback_model="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$fallback_model" ]]; then
+            printf '%s\n' 'No verified free OpenCode model is available; checking paid Qwen fallback.'
+          fi
+          if [[ -z "$fallback_model" ]]; then
           for candidate in \
             'opencode-go-openai/qwen3.8-flash' \
             'opencode-go-openai-2/qwen3.8-flash'; do
@@ -137,6 +152,7 @@ jobs:
               fi
             fi
           done
+          fi
           if [[ -z "$fallback_model" && -z "${REQUESTED_MODEL:-}" ]]; then
             printf '%s\n' 'No coordinator fallback model is available; not dispatching.' >&2
             exit 1
