@@ -11,8 +11,22 @@ on:
         description: Optional OpenCode model (for example, opencode-go-openai/glm-5.2)
         required: false
         type: string
+  workflow_call:
+    inputs:
+      prompt:
+        description: Task for OpenCode
+        required: true
+        type: string
+      model:
+        description: Optional OpenCode model (for example, opencode-go-openai/glm-5.2)
+        required: false
+        type: string
 
 permissions:
+  actions: write
+  artifact-metadata: write
+  checks: read
+  packages: write
   contents: write
   issues: write
   pull-requests: write
@@ -20,10 +34,12 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+      OPENCODE_GO_2_API_KEY: ${{ secrets.OPENCODE_GO_2_API_KEY }}
+      BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
 
     steps:
       - name: Check out target repository
@@ -33,116 +49,35 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install OpenCode
-        run: npm install --global opencode-ai@1.18.18
-
-      - name: Fetch and prepare OpenCode configuration
-        id: config
-        shell: bash
-        env:
-          SOURCE_REPOSITORY: https://github.com/bacluc/provision-machines.git
-          CONFIG_PATH: deploys/development_tools/ai_agent_devcontainer/files/opencode
-        run: |
-          set -Eeuo pipefail
-
-          printf '::add-mask::%s\n' "$GITHUB_TOKEN"
-          printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
-          if [[ -z "${OPENCODE_GO_API_KEY:-}" ]]; then
-            printf '%s\n' 'Missing required repository secret: OPENCODE_GO_API_KEY' >&2
-            exit 1
-          fi
-
-          source_dir="$RUNNER_TEMP/provision-machines"
-          config_dir="$RUNNER_TEMP/opencode-config"
-          mapfile -t tags < <(git ls-remote --tags "$SOURCE_REPOSITORY" \
-            | awk '$2 !~ /\^\{\}$/ { sub("refs/tags/", "", $2); print $2 }' \
-            | grep -E '^[vV]?[0-9]+([.][0-9]+){1,2}([-.][0-9A-Za-z.-]+)?$' \
-            | sort -V)
-
-          if ((${#tags[@]} == 0)); then
-            printf '%s\n' 'No semver tags found in the source repository' >&2
-            exit 1
-          fi
-
-          tag="${tags[${#tags[@]}-1]}"
-          tag_refs="$(git ls-remote --tags "$SOURCE_REPOSITORY" "refs/tags/$tag" "refs/tags/$tag^{}")"
-          tag_sha="$(printf '%s\n' "$tag_refs" | awk -v tag="$tag" \
-            '$2 == "refs/tags/" tag "^{}" { peeled=$1 } $2 == "refs/tags/" tag { direct=$1 } END { print peeled ? peeled : direct }')"
-          if [[ ! "$tag_sha" =~ ^[0-9a-f]{40}$ ]]; then
-            printf 'Unable to resolve source config tag to a commit: %s\n' "$tag" >&2
-            exit 1
-          fi
-          printf 'Using source config tag: %s (commit %s)\n' "$tag" "$tag_sha"
-          git clone --quiet "$SOURCE_REPOSITORY" "$source_dir"
-          git -C "$source_dir" checkout --quiet --detach "$tag_sha"
-          if [[ ! -d "$source_dir/$CONFIG_PATH" ]]; then
-            printf 'Missing OpenCode configuration directory: %s\n' "$CONFIG_PATH" >&2
-            exit 1
-          fi
-          rm -rf "$config_dir"
-          cp -a "$source_dir/$CONFIG_PATH" "$config_dir"
-
-          python3 - "$config_dir" <<'PY'
-          import pathlib
-          import re
-          import sys
-
-          root = pathlib.Path(sys.argv[1])
-          instruction = """
-
-          ## Agent progress and branches
-
-          Track progress in an issue in https://github.com/bacluc-agent/agent-todo. Use the assigned issue, or create one when none is assigned, and continue from that issue. Always push changes to a branch so work is not lost, and record the branch name in the issue.
-          """
-
-          for path in root.rglob("*"):
-              if path.is_file() and path.name.lower() in {"agents.md", "agent.md"} \
-                      and path.stem.lower() != "model-discovery":
-                  path.write_text(path.read_text() + instruction)
-
-          config = root / "opencode.jsonc"
-          text = config.read_text()
-          pattern = re.compile(
-              r'("opencode-go-(?:anthropic|openai)(?:-2)?"\s*:\s*\{.*?'
-              r'"options"\s*:\s*\{)(.*?)(\}\s*,\s*"models")',
-              re.DOTALL,
-          )
-          text, count = pattern.subn(
-              r'\1\n        "apiKey": "{env:OPENCODE_GO_API_KEY}",\2\3',
-              text,
-          )
-          if count != 4:
-              raise SystemExit(f"Expected four OpenCode Go providers, found {count}")
-          config.write_text(text)
-
-          discovery = root / "agents" / "model-discovery.md"
-          if not discovery.exists():
-              discovery.write_text("""---
-          description: Selects an available model
-          mode: all
-          hidden: true
-          permission:
-            \"*\": allow
-          ---
-
-          Return one line exactly: `CARRIERS:` followed by one `coordinator: provider/model` entry. Choose an available OpenCode Go model suitable for the task, using the configured model catalog. Do not do the requested work or return any other text.
-          """)
-          PY
-
-          mkdir -p "$HOME/.config"
-          rm -rf "$HOME/.config/opencode"
-          cp -a "$config_dir" "$HOME/.config/opencode"
+      - name: Set up OpenCode
+        uses: ./.github/actions/setup-opencode
 
       - name: Select model and run coordinator
         shell: bash
         env:
           PROMPT: ${{ inputs.prompt }}
           REQUESTED_MODEL: ${{ inputs.model }}
+          BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
           printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
+          copilot_auth_content=''
+          if [[ -n "${BACLUC_AGENT_GITHUB_TOKEN:-}" ]]; then
+            printf '::add-mask::%s\n' "$BACLUC_AGENT_GITHUB_TOKEN"
+            copilot_auth_content="$(python3 -c 'import json, sys; token = sys.stdin.read().rstrip(); print(json.dumps({"github-copilot": {"type": "oauth", "refresh": token, "access": token}}, separators=(",", ":")))' <<<"$BACLUC_AGENT_GITHUB_TOKEN")"
+            printf '::add-mask::%s\n' "$copilot_auth_content"
+          fi
+
+          run_opencode() {
+            if [[ -n "$copilot_auth_content" ]]; then
+              OPENCODE_AUTH_CONTENT="$copilot_auth_content" opencode "$@"
+            else
+              opencode "$@"
+            fi
+          }
+
           printf '%s\n' 'Model selection reasoning: use the requested model unchanged when provided; otherwise discover an available coordinator model.'
           fallback_model='opencode-go-openai/qwen3.8-flash'
           model="${REQUESTED_MODEL:-}"
@@ -152,7 +87,7 @@ jobs:
             printf '%s\n' 'Model detection prompt/reasoning: select one configured OpenCode Go model suitable for this task and return it as the coordinator carrier.'
             discovery_prompt="$(printf '%s\n\nUser task:\n%s' 'Run opencode models. Choose one listed opencode-go-* model suitable for the user task. Do not call APIs, read credentials, write files, edit repos, or do the task. Output exactly one line: CARRIERS: coordinator: provider/model' "$PROMPT")"
             set +e
-            opencode run --agent model-discovery --model "$fallback_model" "$discovery_prompt" 2>&1 | tee "$discovery_output"
+            run_opencode run --agent model-discovery --model "$fallback_model" "$discovery_prompt" 2>&1 | tee "$discovery_output"
             discovery_statuses=("${PIPESTATUS[@]}")
             discovery_status=${discovery_statuses[0]}
             discovery_tee_status=${discovery_statuses[1]}
@@ -177,7 +112,7 @@ jobs:
           available_models="$RUNNER_TEMP/opencode-models.out"
           printf '%s\n' 'Model availability command: opencode models'
           set +e
-          opencode models 2>&1 | tee "$available_models"
+          run_opencode models 2>&1 | tee "$available_models"
           available_statuses=("${PIPESTATUS[@]}")
           available_command_status=${available_statuses[0]}
           available_tee_status=${available_statuses[1]}
@@ -198,12 +133,25 @@ jobs:
 
           requested = sys.argv[1]
           available = [line.strip() for line in open(sys.argv[2]) if line.strip()]
+          aliases = {
+              "qwen-3.8-flash": "opencode-go-openai/qwen3.8-flash",
+          }
 
           if requested in available:
               print(f"available\t{requested}")
               raise SystemExit
 
           if "/" not in requested:
+              alias = aliases.get(requested)
+              if alias is not None:
+                  matches = [model for model in available if model == alias]
+                  if len(matches) == 1:
+                      print(f"available\t{matches[0]}")
+                      raise SystemExit
+                  if len(matches) > 1:
+                      print(f"ambiguous\t{','.join(matches)}")
+                      raise SystemExit
+
               normalized = re.sub(r"[^a-z0-9]", "", requested.lower())
               matches = [
                   model for model in available
@@ -245,7 +193,7 @@ jobs:
 
           printf 'Final coordinator command: opencode run --agent coordinator --model %q [prompt omitted]\n' "$model"
           set +e
-          opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
+          run_opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
           coordinator_statuses=("${PIPESTATUS[@]}")
           coordinator_status=${coordinator_statuses[0]}
           coordinator_tee_status=${coordinator_statuses[1]}
