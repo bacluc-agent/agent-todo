@@ -169,8 +169,8 @@ jobs:
               model="$({ grep -oE 'coordinator: [^,[:space:]]+' "$discovery_output" || true; } | tail -n 1 | cut -d' ' -f2-)"
             fi
             if [[ -z "$model" ]]; then
-              model='qwen-3.8-flash'
-              printf '%s\n' 'Model fallback: model-discovery failed or returned no usable model; using qwen-3.8-flash.'
+              model='opencode-go-openai/qwen3.8-flash'
+              printf '%s\n' 'Model fallback: model-discovery failed or returned no usable model; using opencode-go-openai/qwen3.8-flash.'
             fi
           else
             printf 'Model selection: preserving explicit model input: %q\n' "$model"
@@ -245,7 +245,7 @@ jobs:
             if [[ "$resolution" == ambiguous ]]; then
               printf 'Model resolution: ambiguous matches for %q: %s\n' "$requested_model" "$resolved" >&2
             fi
-            fallback_model='qwen-3.8-flash'
+            fallback_model='opencode-go-openai/qwen3.8-flash'
             printf 'Model fallback: using %q\n' "$fallback_model"
             IFS=$'\t' read -r fallback_resolution fallback_resolved < <(resolve_model "$fallback_model")
             if [[ "$fallback_resolution" != available ]]; then
