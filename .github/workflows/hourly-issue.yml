@@ -31,6 +31,7 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+      OPENCODE_GO_2_API_KEY: ${{ secrets.OPENCODE_GO_2_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -52,6 +53,7 @@ jobs:
 
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
           printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
+          printf '::add-mask::%s\n' "$OPENCODE_GO_2_API_KEY"
 
           gh label create agent-running -R "$GITHUB_REPOSITORY" \
             --color 0E8A16 --description 'Selected by the hourly issue runner' --force
@@ -72,6 +74,31 @@ jobs:
           printf 'Unclaimed candidate issues (oldest first):\n'
           cat "$candidates"
 
+          available_models="$RUNNER_TEMP/opencode-models.out"
+          set +e
+          opencode models > "$available_models" 2>&1
+          availability_status=$?
+          set -e
+          cat "$available_models"
+          if (( availability_status != 0 )); then
+            printf 'Unable to verify model availability; not dispatching.\n' >&2
+            exit "$availability_status"
+          fi
+          selection_model=''
+          for candidate in \
+            'opencode-go-openai/qwen3.8-flash' \
+            'opencode-go-openai-2/qwen3.8-flash'; do
+            if grep -Fxq "$candidate" "$available_models"; then
+              selection_model="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$selection_model" ]]; then
+            printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
+            exit 1
+          fi
+          printf 'Issue selection model: %s\n' "$selection_model"
+
           default_tail="$(cat scripts/issue-selection-tail.txt)"
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
 
@@ -86,7 +113,7 @@ jobs:
           # keep stderr in the step log but forward only the stripped stdout as the implementation prompt.
           selection="$RUNNER_TEMP/selection.out"
           set +e
-          opencode run --agent issue-selector --model 'opencode-go-openai/qwen3.8-flash' "$(< "$prompt")" > "$selection"
+          timeout 10m opencode run --agent issue-selector --model "$selection_model" "$(< "$prompt")" > "$selection"
           selection_status=$?
           set -e
           printf 'Model selection status: %s\n' "$selection_status"
