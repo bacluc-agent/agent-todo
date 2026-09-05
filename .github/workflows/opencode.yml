@@ -248,17 +248,69 @@ jobs:
             model="$fallback_resolved"
           fi
 
-          printf 'Final coordinator command: opencode run --agent coordinator --model %q [prompt omitted]\n' "$model"
+          coordinator_session_title='coordinator-run'
+          printf 'Final coordinator command: opencode run --agent coordinator --model %q --title %q [prompt omitted]\n' "$model" "$coordinator_session_title"
           coordinator_stop_token="$(openssl rand -hex 32)"
           printf '::stop-commands::%s\n' "$coordinator_stop_token"
           set +e
-          run_opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
+          run_opencode run --agent coordinator --model "$model" --title "$coordinator_session_title" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
           coordinator_statuses=("${PIPESTATUS[@]}")
           coordinator_status=${coordinator_statuses[0]}
           coordinator_tee_status=${coordinator_statuses[1]}
           set -e
           printf '::%s::\n' "$coordinator_stop_token"
           printf 'Coordinator statuses: opencode=%s tee=%s\n' "$coordinator_status" "$coordinator_tee_status"
+
+          # Subagent transcripts (issue #21): the run stream drops task child-session
+          # parts, so walk the exported root session for child ids and print their
+          # transcripts. The marker comments delimit the body that
+          # scripts/test-subagent-transcripts extracts and runs against fixtures.
+          # Transcript output is fenced with ::stop-commands:: like other
+          # untrusted output, so subagent text cannot inject workflow commands.
+          dump_subagent_transcripts() {
+            # subagent-transcript-dump:begin
+            local root_id child_id transcript_stop_token
+            local -a child_ids=()
+            # shellcheck disable=SC2016  # the jq program below is literal, not shell
+            local renderer='
+              def trunc(n): if length > n then .[0:n] + "...[truncated]" else . end;
+              def as_text: if type == "string" then . else tojson end;
+              (.info.agent // "subagent") as $agent
+              | ("--- Subagent transcript: " + $agent + " (" + $sid + ") ---"),
+                (.messages[]? | .parts[]?
+                 | if .type == "text" and ((.text // "") | length) > 0 then
+                     "[" + $agent + "] " + .text
+                   elif .type == "tool" and ((.tool // "") != "task") then
+                     ((.state // {}) as $s
+                       | "[" + $agent + ":tool] " + (.tool // "unknown") + " " + (($s.input // {}) | tojson | trunc(200))
+                         + (if $s.status? == "completed" and $s.output? != null and (($s.output | as_text) | length) > 0
+                            then "\n  output: " + ($s.output | as_text | trunc(500))
+                            else "" end))
+                   else empty end)
+            '
+            root_id="$(run_opencode session list --format json \
+              | jq -r --arg t "$coordinator_session_title" '[.[] | select(.title == $t)][0].id // empty' \
+              || true)"
+            if [[ -z "$root_id" ]]; then
+              printf '%s\n' 'No coordinator session found; skipping subagent transcripts.'
+              return 0
+            fi
+            mapfile -t child_ids < <(run_opencode export "$root_id" \
+              | jq -r '.. | objects | select(.tool? == "task") | .state.metadata.sessionId? // empty' \
+              | sort -u || true)
+            if (( ${#child_ids[@]} == 0 )); then
+              printf '%s\n' 'Coordinator run used no subagents.'
+              return 0
+            fi
+            transcript_stop_token="$(openssl rand -hex 32)"
+            printf '::stop-commands::%s\n' "$transcript_stop_token"
+            for child_id in "${child_ids[@]}"; do
+              run_opencode export "$child_id" | jq -r --arg sid "$child_id" "$renderer" || true
+            done
+            printf '::%s::\n' "$transcript_stop_token"
+            # subagent-transcript-dump:end
+          }
+          dump_subagent_transcripts || true
           if ((coordinator_status != 0)); then
             exit "$coordinator_status"
           fi

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Structural check for the subagent transcript dump (issue #21): extracts the
+# dump_subagent_transcripts body from opencode.yml between its marker comments,
+# runs it against canned `opencode session list`/`opencode export` fixtures, and
+# asserts it renders child text/tool lines (with truncated tool input/output),
+# skips reasoning and task parts, fences the transcript with a matching
+# ::stop-commands:: pair, and degrades with notes when there is no
+# coordinator session or no subagents. No real opencode needed, only jq
+# and openssl.
+set -Eeuo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+body="$(sed -n '/# subagent-transcript-dump:begin/,/# subagent-transcript-dump:end/p' .github/workflows/opencode.yml | sed 's/^            //')"
+if [[ -z "$body" ]]; then
+  printf 'FAIL: subagent-transcript-dump marker comments not found in .github/workflows/opencode.yml\n' >&2
+  exit 1
+fi
+
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  printf '%s\n' '--- actual output ---' "$2" >&2
+  exit 1
+}
+
+fixtures="$(mktemp -d)"
+trap 'rm -rf "$fixtures"' EXIT
+
+long_input="$(printf 'x%.0s' {1..300})"
+long_output="$(printf 'y%.0s' {1..700})"
+
+printf '[{"id":"ses_root","title":"coordinator-run","updated":1,"created":1}]\n' >"$fixtures/sessions.json"
+
+cat >"$fixtures/ses_root.json" <<'JSON'
+{
+  "info": {"id": "ses_root"},
+  "messages": [
+    {"info": {"role": "assistant"}, "parts": [
+      {"type": "text", "text": "delegating now"},
+      {"type": "tool", "tool": "task", "state": {
+        "status": "completed",
+        "input": {"prompt": "read the docs"},
+        "metadata": {"sessionId": "ses_child1"},
+        "output": "<task_result>done reading the docs</task_result>"
+      }}
+    ]}
+  ]
+}
+JSON
+
+jq -n --arg cmd "echo ${long_input}" --arg out "$long_output" '
+  {info: {id: "ses_child1", agent: "planner"}, messages: [
+    {info: {role: "assistant"}, parts: [
+      {type: "reasoning", text: "hidden-chain-of-thought"},
+      {type: "tool", tool: "bash", state: {status: "completed", input: {command: $cmd}, output: $out}},
+      {type: "tool", tool: "task", state: {status: "completed", input: {prompt: "delegate"}, metadata: {sessionId: "ses_grand"}, output: "grandchild done"}},
+      {type: "text", text: "done reading the docs"}
+    ]}
+  ]}' >"$fixtures/ses_child1.json"
+
+# shellcheck disable=SC2034  # consumed by the eval'd function body
+coordinator_session_title='coordinator-run'
+run_opencode() {
+  if [[ "$1" == 'session' && "$2" == 'list' ]]; then
+    cat "$fixtures/sessions.json"
+    return 0
+  fi
+  if [[ "$1" == 'export' && -f "$fixtures/$2.json" ]]; then
+    cat "$fixtures/$2.json"
+    return 0
+  fi
+  printf 'unexpected opencode call: %s\n' "$*" >&2
+  return 1
+}
+
+eval "$(printf 'dump_subagent_transcripts() {\n%s\n}' "$body")"
+
+out="$(dump_subagent_transcripts)"
+grep -qF -- '--- Subagent transcript: planner (ses_child1) ---' <<<"$out" || fail 'missing child header' "$out"
+grep -qF -- '[planner] done reading the docs' <<<"$out" || fail 'missing child text part' "$out"
+grep -qF -- '[planner:tool] bash {"command":"echo ' <<<"$out" || fail 'missing tool-call line' "$out"
+grep -qF -- '  output: yyyyy' <<<"$out" || fail 'missing truncated tool output' "$out"
+grep -qF -- '...[truncated]' <<<"$out" || fail 'missing truncation marker' "$out"
+grep -qF -- 'hidden-chain-of-thought' <<<"$out" && fail 'reasoning part must be skipped' "$out"
+grep -qF -- ':tool] task' <<<"$out" && fail 'task part must be skipped' "$out"
+grep -qF -- 'delegating now' <<<"$out" && fail 'root transcript must not be re-printed' "$out"
+stop_token="$(sed -n 's/^::stop-commands::\([0-9a-f]*\)$/\1/p' <<<"$out")"
+end_token="$(sed -n 's/^::\([0-9a-f]*\)::$/\1/p' <<<"$out")"
+[[ -n "$stop_token" && "$stop_token" == "$end_token" ]] || fail 'transcript output must be fenced with a matching stop-commands pair' "$out"
+printf 'PASS [render]: child text/tool lines rendered, truncation applied, reasoning/task skipped, output fenced\n'
+
+printf '[{"id":"ses_other","title":"unrelated session","updated":1,"created":1}]\n' >"$fixtures/sessions.json"
+out="$(dump_subagent_transcripts)"
+grep -qF -- 'No coordinator session found' <<<"$out" || fail 'missing no-session note' "$out"
+grep -qF -- 'stop-commands' <<<"$out" && fail 'no-session path must not emit a fence' "$out"
+printf 'PASS [no-root]: title mismatch degrades to a note\n'
+
+printf '[{"id":"ses_root2","title":"coordinator-run","updated":1,"created":1}]\n' >"$fixtures/sessions.json"
+jq -n '{info: {id: "ses_root2"}, messages: [{info: {role: "assistant"}, parts: [{type: "text", text: "solo work"}]}]}' >"$fixtures/ses_root2.json"
+out="$(dump_subagent_transcripts)"
+grep -qF -- 'Coordinator run used no subagents' <<<"$out" || fail 'missing no-subagents note' "$out"
+grep -qF -- 'stop-commands' <<<"$out" && fail 'no-subagents path must not emit a fence' "$out"
+printf 'PASS [no-children]: task-free run degrades to a note\n'
+
+printf 'OK: subagent transcript dump renders, truncates, and degrades correctly\n'
