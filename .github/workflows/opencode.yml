@@ -71,6 +71,25 @@ jobs:
             cat "$1"
             printf '::%s::\n' "$stop_token"
           }
+          redact_file() {
+            python3 - "$1" <<'PY'
+          import os
+          import pathlib
+          import sys
+          import tempfile
+
+          path = pathlib.Path(sys.argv[1])
+          output = path.read_bytes().decode(errors='replace')
+          for name in ('GITHUB_TOKEN', 'OPENCODE_GO_API_KEY', 'OPENCODE_GO_2_API_KEY'):
+              secret = os.environ.get(name, '')
+              if secret:
+                  output = output.replace(secret, '***')
+          with tempfile.NamedTemporaryFile('w', dir=path.parent, delete=False) as file:
+              file.write(output)
+              temporary = file.name
+          os.replace(temporary, path)
+          PY
+          }
           copilot_auth_content=''
           if [[ -n "${BACLUC_AGENT_GITHUB_TOKEN:-}" ]]; then
             printf '::add-mask::%s\n' "$BACLUC_AGENT_GITHUB_TOKEN"
@@ -95,11 +114,23 @@ jobs:
           }
 
           probe_model() {
+            local probe_output probe_status
+            probe_output="$(mktemp "$RUNNER_TEMP/fallback-probe.XXXXXX")"
             if [[ -n "$copilot_auth_content" ]]; then
-              OPENCODE_AUTH_CONTENT="$copilot_auth_content" timeout 45s opencode "$@" >/dev/null 2>&1
+              set +e
+              OPENCODE_AUTH_CONTENT="$copilot_auth_content" timeout 45s opencode "$@" > "$probe_output" 2>&1
+              probe_status=$?
+              set -e
             else
-              timeout 45s opencode "$@" >/dev/null 2>&1
+              set +e
+              timeout 45s opencode "$@" > "$probe_output" 2>&1
+              probe_status=$?
+              set -e
             fi
+            redact_file "$probe_output"
+            printf 'Fallback probe output (status %s):\n' "$probe_status"
+            log_untrusted_file "$probe_output"
+            return "$probe_status"
           }
 
           available_models="$RUNNER_TEMP/opencode-models.out"
