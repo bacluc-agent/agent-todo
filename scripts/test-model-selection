@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
+printf '  │ opencode-go-openai/qwen3.8-flash │\r\n  │ opencode/mimo-v2.5-free │\r\n' > "$workdir/models"
+[[ "$(scripts/select-model "$workdir/models")" == opencode/mimo-v2.5-free ]]
+
+printf '%s\n' opencode-go-openai/qwen3.8-flash > "$workdir/qwen"
+if OPENCODE_GO_API_KEY='' scripts/select-model "$workdir/qwen"; then
+  printf '%s\n' 'FAIL: selected unauthenticated Qwen model' >&2
+  exit 1
+fi
+[[ "$(OPENCODE_GO_API_KEY=test scripts/select-model "$workdir/qwen")" == opencode-go-openai/qwen3.8-flash ]]
+
+printf '%s\n' 'OK: free models win and paid Qwen requires credentials'

@@ -2,7 +2,7 @@ name: Set up OpenCode
 description: >-
   Installs the OpenCode CLI and prepares the shared OpenCode configuration
   from the provision-machines repository. Relies on the job-level
-  GITHUB_TOKEN and at least one OPENCODE_GO API key env var set by the caller.
+  GITHUB_TOKEN and optional OPENCODE_GO API key env vars set by the caller.
 runs:
   using: composite
   steps:
@@ -22,11 +22,6 @@ runs:
         printf '::add-mask::%s\n' "$GITHUB_TOKEN"
         printf '::add-mask::%s\n' "${OPENCODE_GO_API_KEY:-}"
         printf '::add-mask::%s\n' "${OPENCODE_GO_2_API_KEY:-}"
-        if [[ -z "${OPENCODE_GO_API_KEY:-}" && -z "${OPENCODE_GO_2_API_KEY:-}" ]]; then
-          printf '%s\n' 'Missing required repository secret: OPENCODE_GO_API_KEY or OPENCODE_GO_2_API_KEY' >&2
-          exit 1
-        fi
-
         source_dir="$RUNNER_TEMP/provision-machines"
         config_dir="$RUNNER_TEMP/opencode-config"
         mapfile -t tags < <(git ls-remote --tags "$SOURCE_REPOSITORY" \

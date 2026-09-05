@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+available_models=${1:?Usage: scripts/select-model AVAILABLE_MODELS_FILE}
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+models_file="$(mktemp)"
+trap 'rm -f "$models_file"' EXIT
+"$script_dir/normalize-models" "$available_models" > "$models_file"
+
+while IFS= read -r model; do
+  [[ "$model" =~ ^opencode/[^[:space:]]+-free$ ]] || continue
+  printf '%s\n' "$model"
+  exit 0
+done < "$models_file"
+
+for candidate in opencode-go-openai/qwen3.8-flash opencode-go-openai-2/qwen3.8-flash; do
+  case "$candidate" in
+    opencode-go-openai/*) [[ -n "${OPENCODE_GO_API_KEY:-}" ]] || continue ;;
+    opencode-go-openai-2/*) [[ -n "${OPENCODE_GO_2_API_KEY:-}" ]] || continue ;;
+  esac
+  grep -Fxq "$candidate" "$models_file" || continue
+  printf '%s\n' "$candidate"
+  exit 0
+done
+exit 1

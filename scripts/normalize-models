@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+available_models=${1:?Usage: scripts/normalize-models AVAILABLE_MODELS_FILE}
+tr -d '\r' < "$available_models" | tr '|│' '  ' | awk '{ for (i = 1; i <= NF; i++) print $i }'

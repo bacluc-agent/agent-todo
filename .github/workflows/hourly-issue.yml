@@ -88,29 +88,25 @@ jobs:
             printf 'Unable to verify model availability; not dispatching.\n' >&2
             exit "$availability_status"
           fi
+          canonical_models="$RUNNER_TEMP/canonical-models.out"
+          scripts/normalize-models "$available_models" > "$canonical_models"
+          available_models="$canonical_models"
           selection_model=''
-          for candidate in \
-            'opencode-go-openai/qwen3.8-flash' \
-            'opencode-go-openai-2/qwen3.8-flash'; do
-            if grep -Fxq "$candidate" "$available_models"; then
-              case "$candidate" in
-                opencode-go-openai/qwen3.8-flash) [[ -n "$OPENCODE_GO_API_KEY" ]] || continue ;;
-                opencode-go-openai-2/qwen3.8-flash) [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue ;;
-              esac
-              probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
-              printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q [prompt omitted]\n' "$RUNNER_TEMP" "$candidate"
-              set +e
-              timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
-              probe_statuses=("${PIPESTATUS[@]}")
-              set -e
-              probe_status=${probe_statuses[0]}
-              probe_tee_status=${probe_statuses[1]}
-              printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$probe_tee_status"
-              if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$(< "$probe_output")" == OK ]]; then
-                selection_model="$candidate"
-                break
-              fi
+          while candidate="$(scripts/select-model "$available_models")"; do
+            probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
+            set +e
+            timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
+            probe_statuses=("${PIPESTATUS[@]}")
+            set -e
+            probe_status=${probe_statuses[0]}
+            probe_tee_status=${probe_statuses[1]}
+            if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$(< "$probe_output")" == OK ]]; then
+              selection_model="$candidate"
+              break
             fi
+            remaining_models="$RUNNER_TEMP/remaining-models.out"
+            grep -Fvx -- "$candidate" "$available_models" > "$remaining_models" || true
+            mv "$remaining_models" "$available_models"
           done
           if [[ -z "$selection_model" ]]; then
             printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2

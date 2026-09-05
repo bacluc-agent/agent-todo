@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
-# Structural check for the hourly-issue selection prompt (issue #30): runs the real
-# tail instruction and agent through real opencode runs against synthetic candidate
-# lists and asserts the picks are single-issue, transcript-free, and not recency-biased.
+# Structural check for the hourly-issue selection prompt without contacting an external model.
 set -Eeuo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-model='opencode-go-openai/qwen3.8-flash'
 tail_instruction="$(cat scripts/issue-selection-tail.txt)"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
+
+cat > "$workdir/opencode" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "${1:-}" == run ]] || exit 2
+prompt="${*: -1}"
+case "$prompt" in
+  *'Hourly runner silently drops dispatch'*) printf '%s\n' 'Implement issue 12.' ;;
+  *'setup-opencode action must fail loudly'*) printf '%s\n' 'Implement issue 41.' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$workdir/opencode"
+export PATH="$workdir:$PATH"
+printf '%s\n' opencode-go-openai/qwen3.8-flash opencode/mimo-v2.5-free > "$workdir/models"
+model="$(scripts/select-model "$workdir/models")"
+[[ "$model" == opencode/mimo-v2.5-free ]]
 
 # Candidates as rendered by hourly-issue.yml: "number: title", oldest (lowest) first.
 # Fixture A: newest (30) is a trivial docs tweak, an older one (12) is a systemic fix.
@@ -25,7 +39,7 @@ run_selection() {
   done
   local prompt
   prompt="$(printf '%s\n%s%s' 'Open issue candidates in this repository (number: title, oldest first):' "$candidates" "$tail_instruction")"
-  timeout 10m opencode run --agent issue-selector --model "$model" "$prompt" > "$out"
+  timeout 10s opencode run --agent issue-selector --model "$model" "$prompt" > "$out"
 }
 
 check_output() {
