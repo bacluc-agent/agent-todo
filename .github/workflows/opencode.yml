@@ -27,8 +27,9 @@ jobs:
 
     steps:
       - name: Check out target repository
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: bacluc-agent/agent-todo
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -44,6 +45,8 @@ jobs:
         run: |
           set -Eeuo pipefail
 
+          printf '::add-mask::%s\n' "$GITHUB_TOKEN"
+          printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
           if [[ -z "${OPENCODE_GO_API_KEY:-}" ]]; then
             printf '%s\n' 'Missing required repository secret: OPENCODE_GO_API_KEY' >&2
             exit 1
@@ -64,6 +67,11 @@ jobs:
           tag="${tags[${#tags[@]}-1]}"
           printf 'Using source config tag: %s\n' "$tag"
           git clone --quiet --depth 1 --branch "$tag" "$SOURCE_REPOSITORY" "$source_dir"
+          if [[ ! -d "$source_dir/$CONFIG_PATH" ]]; then
+            printf 'Missing OpenCode configuration directory: %s\n' "$CONFIG_PATH" >&2
+            exit 1
+          fi
+          rm -rf "$config_dir"
           cp -a "$source_dir/$CONFIG_PATH" "$config_dir"
 
           python3 - "$config_dir" <<'PY'
@@ -125,11 +133,33 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          model="$REQUESTED_MODEL"
+          printf '::add-mask::%s\n' "$GITHUB_TOKEN"
+          printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
+          printf '%s\n' 'Model selection reasoning: use the requested model unchanged when provided; otherwise discover an available coordinator model.'
+          model="${REQUESTED_MODEL:-}"
           if [[ -z "$model" ]]; then
             discovery_output="$RUNNER_TEMP/model-discovery.out"
-            opencode run --agent model-discovery "$PROMPT" >"$discovery_output" 2>&1
-            model="$({ grep -oE 'coordinator: [^,[:space:]]+' "$discovery_output" || true; } | tail -n 1 | cut -d' ' -f2-)"
+            printf 'Model detection command:'
+            printf ' %q' opencode run --agent model-discovery "$PROMPT"
+            printf '\n'
+            printf 'Model detection prompt/reasoning: select one configured OpenCode Go model suitable for this task and return it as the coordinator carrier. Prompt: %q\n' "$PROMPT"
+            set +e
+            opencode run --agent model-discovery "$PROMPT" 2>&1 | tee "$discovery_output"
+            discovery_statuses=(${PIPESTATUS[@]})
+            discovery_status=${discovery_statuses[0]}
+            discovery_tee_status=${discovery_statuses[1]}
+            set -e
+            printf 'Model detection statuses: opencode=%s tee=%s\n' "$discovery_status" "$discovery_tee_status"
+            printf '%s\n' 'Raw model detection output:'
+            cat "$discovery_output"
+            if ((discovery_status != 0)); then
+              exit "$discovery_status"
+            elif ((discovery_tee_status != 0)); then
+              exit "$discovery_tee_status"
+             fi
+             model="$({ grep -oE 'coordinator: [^,[:space:]]+' "$discovery_output" || true; } | tail -n 1 | cut -d' ' -f2-)"
+          else
+            printf 'Model selection: preserving explicit model input: %q\n' "$model"
           fi
 
           if [[ -z "$model" ]]; then
@@ -137,5 +167,17 @@ jobs:
             exit 1
           fi
 
-          printf 'Running coordinator with model: %s\n' "$model"
-          opencode run --agent coordinator --model "$model" "$PROMPT"
+          printf 'Coordinator command:'
+          printf ' %q' opencode run --agent coordinator --model "$model" "$PROMPT"
+          printf '\n'
+          set +e
+          opencode run --agent coordinator --model "$model" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
+          coordinator_statuses=(${PIPESTATUS[@]})
+          coordinator_status=${coordinator_statuses[0]}
+          coordinator_tee_status=${coordinator_statuses[1]}
+          set -e
+          printf 'Coordinator statuses: opencode=%s tee=%s\n' "$coordinator_status" "$coordinator_tee_status"
+          if ((coordinator_status != 0)); then
+            exit "$coordinator_status"
+          fi
+          exit "$coordinator_tee_status"
