@@ -21,6 +21,7 @@ runs:
 
         printf '::add-mask::%s\n' "$GITHUB_TOKEN"
         printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
+        printf '::add-mask::%s\n' "${OPENCODE_GO_2_API_KEY:-}"
         if [[ -z "${OPENCODE_GO_API_KEY:-}" ]]; then
           printf '%s\n' 'Missing required repository secret: OPENCODE_GO_API_KEY' >&2
           exit 1
@@ -48,6 +49,11 @@ runs:
         fi
         printf 'Using source config tag: %s (commit %s)\n' "$tag" "$tag_sha"
         git clone --quiet "$SOURCE_REPOSITORY" "$source_dir"
+        cloned_tag_sha="$(git -C "$source_dir" rev-parse --verify "refs/tags/$tag^{commit}" 2>/dev/null || true)"
+        if [[ "$cloned_tag_sha" != "$tag_sha" ]]; then
+          printf 'Source config tag changed while cloning: expected %s, got %s\n' "$tag_sha" "${cloned_tag_sha:-unresolved}" >&2
+          exit 1
+        fi
         git -C "$source_dir" checkout --quiet --detach "$tag_sha"
         if [[ ! -d "$source_dir/$CONFIG_PATH" ]]; then
           printf 'Missing OpenCode configuration directory: %s\n' "$CONFIG_PATH" >&2
