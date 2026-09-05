@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
+cat > "$workdir/opencode" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "${1:-}" == --pure && "${2:-}" == run ]] || exit 2
+model=''
+while (($#)); do
+  if [[ "$1" == --model ]]; then
+    model="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+case "$model" in
+  opencode/mimo-v2.5-free) [[ "${FREE_PROBE:-success}" == fail ]] && exit 1; printf 'OK. \n' ;;
+  opencode-go-openai/qwen3.8-flash) [[ -n "${OPENCODE_GO_API_KEY:-}" ]] || exit 1; printf 'OK\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$workdir/opencode"
+export PATH="$workdir:$PATH"
+
+select_verified() {
+  local models="$1" output_dir="$2" candidate
+  while candidate="$(scripts/select-model "$models")"; do
+    if scripts/probe-model "$candidate" "$output_dir" >/dev/null; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    grep -Fvx -- "$candidate" "$models" > "$models.remaining" || true
+    mv "$models.remaining" "$models"
+  done
+  return 1
+}
+
+printf '%s\n' opencode/mimo-v2.5-free opencode-go-openai/qwen3.8-flash > "$workdir/models"
+export FREE_PROBE=fail OPENCODE_GO_API_KEY=test
+if selected="$(select_verified "$workdir/models" "$workdir")"; then
+  [[ "$selected" == opencode-go-openai/qwen3.8-flash ]]
+else
+  printf '%s\n' 'FAIL: authenticated Qwen was not selected after failed free probe' >&2
+  exit 1
+fi
+
+printf '%s\n' opencode/mimo-v2.5-free opencode-go-openai/qwen3.8-flash > "$workdir/models"
+export FREE_PROBE=success
+selected="$(select_verified "$workdir/models" "$workdir")"
+[[ "$selected" == opencode/mimo-v2.5-free ]]
+
+printf '%s\n' opencode-go-openai/qwen3.8-flash opencode/mimo-v2.5-free > "$workdir/models"
+export OPENCODE_GO_API_KEY=''
+if selected="$(select_verified "$workdir/models" "$workdir")"; then
+  [[ "$selected" == opencode/mimo-v2.5-free ]]
+else
+  printf '%s\n' 'FAIL: free model did not replace the old hardcoded-Qwen path' >&2
+  exit 1
+fi
+
+printf '%s\n' 'OK: hourly probes reject failures, accept formatted OK, and prefer free models'

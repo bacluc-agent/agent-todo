@@ -88,21 +88,11 @@ jobs:
           }
 
           probe_model() {
-            local candidate="$1" probe_output statuses probe_status tee_status
-            probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
-            printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q [prompt omitted]\n' "$RUNNER_TEMP" "$candidate"
-            set +e
             if [[ -n "$copilot_auth_content" ]]; then
-              OPENCODE_AUTH_CONTENT="$copilot_auth_content" timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
+              OPENCODE_AUTH_CONTENT="$copilot_auth_content" scripts/probe-model "$1" "$RUNNER_TEMP"
             else
-              timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
+              scripts/probe-model "$1" "$RUNNER_TEMP"
             fi
-            statuses=("${PIPESTATUS[@]}")
-            set -e
-            probe_status=${statuses[0]}
-            tee_status=${statuses[1]}
-            printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$tee_status"
-            ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
           }
 
           available_models="$RUNNER_TEMP/opencode-models.out"

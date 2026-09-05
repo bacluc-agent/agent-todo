@@ -93,14 +93,7 @@ jobs:
           available_models="$canonical_models"
           selection_model=''
           while candidate="$(scripts/select-model "$available_models")"; do
-            probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
-            set +e
-            timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
-            probe_statuses=("${PIPESTATUS[@]}")
-            set -e
-            probe_status=${probe_statuses[0]}
-            probe_tee_status=${probe_statuses[1]}
-            if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$(< "$probe_output")" == OK ]]; then
+            if scripts/probe-model "$candidate" "$RUNNER_TEMP"; then
               selection_model="$candidate"
               break
             fi

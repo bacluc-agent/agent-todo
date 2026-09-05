@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+candidate=${1:?Usage: scripts/probe-model MODEL OUTPUT_DIR}
+output_dir=${2:?Usage: scripts/probe-model MODEL OUTPUT_DIR}
+probe_output="$output_dir/model-probe-${candidate//\//-}.out"
+
+printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q [prompt omitted]\n' "$output_dir" "$candidate"
+set +e
+timeout 10s opencode --pure run --dir "$output_dir" --model "$candidate" 'Respond with exactly OK.' \
+  2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
+statuses=("${PIPESTATUS[@]}")
+set -e
+probe_status=${statuses[0]}
+tee_status=${statuses[1]}
+printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$tee_status"
+((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
