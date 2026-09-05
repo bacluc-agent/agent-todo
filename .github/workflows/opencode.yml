@@ -143,12 +143,14 @@ jobs:
             if ((discovery_tee_status != 0)); then
               exit "$discovery_tee_status"
             fi
-            if ((discovery_status == 0)); then
-              model="$({ grep -oE 'coordinator: [^,[:space:]]+' "$discovery_output" || true; } | tail -n 1 | cut -d' ' -f2-)"
+            if ((discovery_status != 0)); then
+              printf '%s\n' 'Unable to discover a coordinator model; not dispatching.' >&2
+              exit "$discovery_status"
             fi
-            if [[ -z "$model" ]]; then
-              model="$fallback_model"
-              printf 'Model fallback: model-discovery failed or returned no usable model; using %q.\n' "$fallback_model"
+            model="$({ grep -oE 'coordinator: [^,[:space:]]+' "$discovery_output" || true; } | tail -n 1 | cut -d' ' -f2-)"
+            if [[ -z "$model" ]] || ! grep -Fxq "$model" "$available_models"; then
+              printf '%s\n' 'Model discovery returned no usable available model; not dispatching.' >&2
+              exit 1
             fi
           else
             printf 'Model selection: preserving explicit model input: %q\n' "$model"
