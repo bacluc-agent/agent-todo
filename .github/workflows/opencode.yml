@@ -65,8 +65,16 @@ jobs:
           fi
 
           tag="${tags[${#tags[@]}-1]}"
-          printf 'Using source config tag: %s\n' "$tag"
-          git clone --quiet --depth 1 --branch "$tag" "$SOURCE_REPOSITORY" "$source_dir"
+          tag_refs="$(git ls-remote --tags "$SOURCE_REPOSITORY" "refs/tags/$tag" "refs/tags/$tag^{}")"
+          tag_sha="$(printf '%s\n' "$tag_refs" | awk -v tag="$tag" \
+            '$2 == "refs/tags/" tag "^{}" { peeled=$1 } $2 == "refs/tags/" tag { direct=$1 } END { print peeled ? peeled : direct }')"
+          if [[ ! "$tag_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            printf 'Unable to resolve source config tag to a commit: %s\n' "$tag" >&2
+            exit 1
+          fi
+          printf 'Using source config tag: %s (commit %s)\n' "$tag" "$tag_sha"
+          git clone --quiet "$SOURCE_REPOSITORY" "$source_dir"
+          git -C "$source_dir" checkout --quiet --detach "$tag_sha"
           if [[ ! -d "$source_dir/$CONFIG_PATH" ]]; then
             printf 'Missing OpenCode configuration directory: %s\n' "$CONFIG_PATH" >&2
             exit 1
@@ -181,17 +189,57 @@ jobs:
             exit "$available_command_status"
           fi
 
-          if grep -F -x -q -- "$model" "$available_models"; then
-            printf 'Model availability: selected %q is available\n' "$model"
+          resolve_model() {
+            python3 - "$1" "$available_models" <<'PY'
+          import re
+          import sys
+
+          requested = sys.argv[1]
+          available = [line.strip() for line in open(sys.argv[2]) if line.strip()]
+
+          if requested in available:
+              print(f"available\t{requested}")
+              raise SystemExit
+
+          if "/" not in requested:
+              normalized = re.sub(r"[^a-z0-9]", "", requested.lower())
+              matches = [
+                  model for model in available
+                  if re.sub(r"[^a-z0-9]", "", model.rsplit("/", 1)[-1].lower()) == normalized
+              ]
+              if len(matches) == 1:
+                  print(f"available\t{matches[0]}")
+                  raise SystemExit
+              if len(matches) > 1:
+                  print(f"ambiguous\t{','.join(matches)}")
+                  raise SystemExit
+
+          print("unavailable")
+          PY
+          }
+
+          requested_model="$model"
+          IFS=$'\t' read -r resolution resolved < <(resolve_model "$requested_model")
+          if [[ "$resolution" == available ]]; then
+            printf 'Model availability: requested %q is available; resolved model %q\n' "$requested_model" "$resolved"
+            model="$resolved"
           else
-            printf 'Model availability: selected %q is unavailable\n' "$model"
-            model='qwen-3.8-flash'
-            printf 'Model fallback: using %q\n' "$model"
-            if ! grep -F -x -q -- "$model" "$available_models"; then
-              printf 'Model availability: fallback %q is unavailable; cannot run coordinator.\n' "$model" >&2
+            printf 'Model availability: requested %q is unavailable (%s)\n' "$requested_model" "$resolution"
+            if [[ "$resolution" == ambiguous ]]; then
+              printf 'Model resolution: ambiguous matches for %q: %s\n' "$requested_model" "$resolved" >&2
+            fi
+            fallback_model='qwen-3.8-flash'
+            printf 'Model fallback: using %q\n' "$fallback_model"
+            IFS=$'\t' read -r fallback_resolution fallback_resolved < <(resolve_model "$fallback_model")
+            if [[ "$fallback_resolution" != available ]]; then
+              printf 'Model availability: fallback requested %q is unavailable (%s); cannot run coordinator.\n' "$fallback_model" "$fallback_resolution" >&2
+              if [[ "$fallback_resolution" == ambiguous ]]; then
+                printf 'Model resolution: ambiguous fallback matches for %q: %s\n' "$fallback_model" "$fallback_resolved" >&2
+              fi
               exit 1
             fi
-            printf 'Model availability: fallback %q is available\n' "$model"
+            printf 'Model availability: fallback requested %q is available; resolved model %q\n' "$fallback_model" "$fallback_resolved"
+            model="$fallback_resolved"
           fi
 
           printf 'Final coordinator command: opencode run --agent coordinator --model %q [prompt omitted]\n' "$model"
