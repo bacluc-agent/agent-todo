@@ -20,6 +20,7 @@ PROVIDERS = (
     ("opencode-go-anthropic", "OPENCODE_GO_API_KEY"),
     ("opencode-go-anthropic-2", "OPENCODE_GO_2_API_KEY"),
 )
+PRIORITY_MODELS = ("glm-5.3", "qwen3.8-max", "kimi-k3")
 MAX_CONCURRENT = 5
 PROBE_TIMEOUT_SECONDS = 60
 MODELS_ENDPOINT = "https://opencode.ai/zen/go/v1/models"
@@ -159,14 +160,22 @@ def available_models(
     cache: dict, free_models: list[str], go_model_ids: list[str]
 ) -> list[str]:
     available = []
-    for model in free_models:
-        if cache.get(model, {}).get("ok"):
-            available.append(model)
+    go_model_ids_set = set(go_model_ids)
+    for model in PRIORITY_MODELS:
+        if model not in go_model_ids_set:
+            continue
+        for provider, _ in PROVIDERS:
+            candidate = f"{provider}/{model}"
+            if cache.get(candidate, {}).get("ok"):
+                available.append(candidate)
     for provider, _ in PROVIDERS:
         for model in go_model_ids:
             candidate = f"{provider}/{model}"
             if cache.get(candidate, {}).get("ok"):
                 available.append(candidate)
+    for model in free_models:
+        if cache.get(model, {}).get("ok"):
+            available.append(model)
     return list(dict.fromkeys(available))
 
 
