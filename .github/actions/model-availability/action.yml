@@ -1,0 +1,175 @@
+name: Check model availability
+description: >-
+  Probes every model of every OpenCode Go provider (plus free models) for
+  availability and merges the results into the model-availability cache
+  stored on issue #49. Available models cache for 24 hours, failed models
+  for 2 hours. Relies on the job-level OPENCODE_GO_API_KEY and
+  OPENCODE_GO_2_API_KEY env vars set by the caller.
+inputs:
+  cache-json:
+    description: Current model-availability cache JSON from issue #49
+    required: false
+    default: "{}"
+outputs:
+  cache-json:
+    description: Merged cache JSON (current cache plus fresh probe results)
+    value: ${{ steps.check.outputs.cache-json }}
+  available-models:
+    description: >-
+      Newline-separated model IDs with ok=true in the merged cache, free
+      models first, then paid Go models
+    value: ${{ steps.check.outputs.available-models }}
+runs:
+  using: composite
+  steps:
+    - name: Check model availability
+      id: check
+      shell: bash
+      env:
+        CACHE_JSON: ${{ inputs.cache-json }}
+      run: |
+        set -Eeuo pipefail
+
+        printf '::add-mask::%s\n' "${OPENCODE_GO_API_KEY:-}"
+        printf '::add-mask::%s\n' "${OPENCODE_GO_2_API_KEY:-}"
+
+        available_models="$RUNNER_TEMP/opencode-models.out"
+        set +e
+        timeout 10m opencode models 2>&1 | tee "$available_models"
+        availability_statuses=("${PIPESTATUS[@]}")
+        availability_status=${availability_statuses[0]}
+        availability_tee_status=${availability_statuses[1]}
+        set -e
+        if (( availability_tee_status != 0 )); then
+          exit "$availability_tee_status"
+        fi
+        if (( availability_status != 0 )); then
+          printf 'Unable to verify model availability; not dispatching.\n' >&2
+          exit "$availability_status"
+        fi
+        mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models" | awk '!seen[$0]++')
+
+        session_id="$(openssl rand -hex 16)"
+        go_models_json="$RUNNER_TEMP/go-models.json"
+        curl -sf -H "x-opencode-session: $session_id" \
+          "https://opencode.ai/zen/go/v1/models" > "$go_models_json" 2>/dev/null || echo '{"data":[]}' > "$go_models_json"
+        mapfile -t go_model_ids < <(jq -r '.data[].id // empty' "$go_models_json" | sort -u)
+
+        cache_json="${CACHE_JSON:-}"
+        if [[ -z "$cache_json" ]]; then
+          cache_json='{}'
+        fi
+        now="$(date +%s)"
+        candidates=()
+        for model in "${go_model_ids[@]}"; do
+          for provider in opencode-go-openai opencode-go-openai-2 opencode-go-anthropic opencode-go-anthropic-2; do
+            case "$provider" in
+              opencode-go-openai|opencode-go-anthropic)
+                [[ -n "${OPENCODE_GO_API_KEY:-}" ]] || continue
+                ;;
+              opencode-go-openai-2|opencode-go-anthropic-2)
+                [[ -n "${OPENCODE_GO_2_API_KEY:-}" ]] || continue
+                ;;
+            esac
+            candidates+=("$provider/$model")
+          done
+        done
+        candidates+=("${free_models[@]}")
+
+        results_dir="$RUNNER_TEMP/probe-results"
+        mkdir -p "$results_dir"
+        pending=()
+        for candidate in "${candidates[@]}"; do
+          cache_entry=$(echo "$cache_json" | jq -r --arg model "$candidate" '.[$model] // empty')
+          if [[ -n "$cache_entry" ]]; then
+            cache_ok=$(echo "$cache_entry" | jq -r '.ok')
+            cache_checked=$(echo "$cache_entry" | jq -r '.checked')
+            cache_time=$(date -d "$cache_checked" +%s 2>/dev/null || echo 0)
+            age_hours=$(( (now - cache_time) / 3600 ))
+            if [[ "$cache_ok" == "true" && "$age_hours" -lt 24 ]]; then
+              continue
+            fi
+            if [[ "$cache_ok" == "false" && "$age_hours" -lt 2 ]]; then
+              continue
+            fi
+          fi
+          pending+=("$candidate")
+        done
+
+        max_jobs=5
+        running=0
+        for candidate in "${pending[@]}"; do
+          result_file="$results_dir/${candidate//\//-}"
+          (
+            work_dir="$RUNNER_TEMP/probe-work-${candidate//\//-}"
+            mkdir -p "$work_dir"
+            set +e
+            timeout 10s opencode --pure run --dir "$work_dir" --model "$candidate" 'Respond with exactly OK.' > "$work_dir/probe.out" 2>&1
+            probe_status=$?
+            set -e
+            probe_text="$(sed $'s/\033\\[[0-9;]*[[:alpha:]]//g' "$work_dir/probe.out")"
+            if (( probe_status == 0 )) && grep -Eq '^[[:space:]]*OK\.?[[:space:]]*$' <<<"$probe_text"; then
+              printf 'ok\n' > "$result_file"
+            else
+              printf 'fail\n' > "$result_file"
+            fi
+          ) &
+          running=$((running + 1))
+          if (( running >= max_jobs )); then
+            wait -n || wait
+            running=$((running - 1))
+          fi
+        done
+        wait
+
+        checked="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        for candidate in "${pending[@]}"; do
+          result_file="$results_dir/${candidate//\//-}"
+          if [[ -f "$result_file" && "$(< "$result_file")" == "ok" ]]; then
+            cache_json=$(echo "$cache_json" | jq --arg model "$candidate" --arg checked "$checked" \
+              '. + {($model): {"ok": true, "checked": $checked}}')
+          else
+            cache_json=$(echo "$cache_json" | jq --arg model "$candidate" --arg checked "$checked" \
+              '. + {($model): {"ok": false, "checked": $checked}}')
+          fi
+        done
+
+        available=()
+        for candidate in "${free_models[@]}"; do
+          cache_entry=$(echo "$cache_json" | jq -r --arg model "$candidate" '.[$model] // empty')
+          if [[ -n "$cache_entry" ]] && [[ "$(echo "$cache_entry" | jq -r '.ok')" == "true" ]]; then
+            available+=("$candidate")
+          fi
+        done
+        for provider in opencode-go-openai opencode-go-openai-2 opencode-go-anthropic opencode-go-anthropic-2; do
+          for model in "${go_model_ids[@]}"; do
+            entry="$provider/$model"
+            cache_entry=$(echo "$cache_json" | jq -r --arg model "$entry" '.[$model] // empty')
+            if [[ -n "$cache_entry" ]] && [[ "$(echo "$cache_entry" | jq -r '.ok')" == "true" ]]; then
+              available+=("$entry")
+            fi
+          done
+        done
+        if ((${#available[@]} > 0)); then
+          available_models_list="$(printf '%s\n' "${available[@]}" | awk '!seen[$0]++')"
+        else
+          available_models_list=''
+        fi
+
+        {
+          printf 'cache-json<<CACHE_EOF\n'
+          printf '%s\n' "$cache_json"
+          printf 'CACHE_EOF\n'
+          printf 'available-models<<MODELS_EOF\n'
+          if [[ -n "$available_models_list" ]]; then
+            printf '%s\n' "$available_models_list"
+          fi
+          printf 'MODELS_EOF\n'
+        } >> "$GITHUB_OUTPUT"
+
+        printf 'Available models:\n'
+        if [[ -n "$available_models_list" ]]; then
+          printf '%s\n' "$available_models_list"
+        else
+          printf '%s\n' '(none)'
+        fi
