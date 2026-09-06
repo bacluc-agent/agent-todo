@@ -52,7 +52,7 @@ def write_cache(cache: dict) -> None:
 
 def parse_free_models(opencode_models_output: str) -> list[str]:
     return sorted(
-        set(re.findall(r"^opencode/[^\s]+-free$", opencode_models_output, re.MULTILINE))
+        set(re.findall(r"^[^\s](+-free|big-pickle)$", opencode_models_output, re.MULTILINE))
     )
 
 
