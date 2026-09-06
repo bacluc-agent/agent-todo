@@ -26,9 +26,10 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 ## PR Deduplication
 
-Before selecting an issue, check if a PR already exists for it:
-`gh pr list --state all --head issue-<number>`
+Before generating the prompt for the issue, check if a PR already exists for it.
+One command could be, but this isn't exhaustive`gh pr list --state all --head issue-<number>`.
 If a PR exists, do not create a duplicate; instead, reference the existing PR and continue from it.
+Tell the agent to IMPROVE THE EXISTING PULL REQUEST.
 
 ## Handling Review Feedback
 
