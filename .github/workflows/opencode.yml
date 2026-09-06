@@ -52,6 +52,16 @@ jobs:
       BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
 
     steps:
+      - name: Print inputs
+        run: |
+          printf "prompt: %s\n" "$PROMPT"
+          printf "requested_model: %s\n" "$REQUESTED_MODEL"
+          printf "timeout_minutes: %s\n" "$TIMEOUT_MINUTES"
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          REQUESTED_MODEL: ${{ inputs.model }}
+          TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+
       - name: Check out target repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
