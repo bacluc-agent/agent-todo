@@ -15,14 +15,13 @@ CACHE_ISSUE = 49
 AVAILABLE_TTL_HOURS = 24
 FAILED_TTL_HOURS = 2
 PROVIDERS = (
-    ("opencode-go-openai", "OPENCODE_GO_API_KEY"),
-    ("opencode-go-openai-2", "OPENCODE_GO_2_API_KEY"),
-    ("opencode-go-anthropic", "OPENCODE_GO_API_KEY"),
-    ("opencode-go-anthropic-2", "OPENCODE_GO_2_API_KEY"),
+    ("opencode-go-openai", "OPENCODE_GO_API_KEY", "https://opencode.ai/zen/go/v1"),
+    ("opencode-go-openai-2", "OPENCODE_GO_2_API_KEY", "https://opencode.ai/zen/go/v1"),
+    ("opencode-go-anthropic", "OPENCODE_GO_API_KEY", "https://opencode.ai/zen/go/v1"),
+    ("opencode-go-anthropic-2", "OPENCODE_GO_2_API_KEY", "https://opencode.ai/zen/go/v1"),
 )
 MAX_CONCURRENT = 5
 PROBE_TIMEOUT_SECONDS = 60
-MODELS_ENDPOINT = "https://opencode.ai/zen/go/v1/models"
 PROBE_PROMPT = "Respond with exactly OK."
 
 
@@ -69,18 +68,26 @@ def discover_models() -> tuple[list[str], list[str]]:
         ["opencode", "models"], check=True, capture_output=True, text=True, timeout=600
     ).stdout
     free_models = parse_free_models(output)
-    go_model_ids = []
-    try:
-        session_id = os.urandom(16).hex()
-        request = urllib.request.Request(
-            MODELS_ENDPOINT,
-            headers={"x-opencode-session": session_id, "User-Agent": "curl/8.5.0"},
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            go_model_ids = parse_go_model_ids(response.read().decode())
-    except Exception:
-        pass
-    return free_models, go_model_ids
+    go_model_ids: set[str] = set()
+    for _provider, key_env, base_url in PROVIDERS:
+        api_key = os.environ.get(key_env)
+        if not api_key:
+            continue
+        try:
+            session_id = os.urandom(16).hex()
+            request = urllib.request.Request(
+                f"{base_url}/models",
+                headers={
+                    "x-opencode-session": session_id,
+                    "User-Agent": "curl/8.5.0",
+                    "Authorization": f"Bearer {api_key}",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                go_model_ids.update(parse_go_model_ids(response.read().decode()))
+        except Exception:
+            pass
+    return free_models, sorted(go_model_ids)
 
 
 def build_candidates(
@@ -88,7 +95,7 @@ def build_candidates(
 ) -> list[str]:
     candidates = []
     for model in go_model_ids:
-        for provider, key_env in PROVIDERS:
+        for provider, key_env, _ in PROVIDERS:
             if env.get(key_env):
                 candidates.append(f"{provider}/{model}")
     candidates.extend(free_models)
@@ -163,7 +170,7 @@ def available_models(
     for model in free_models:
         if cache.get(model, {}).get("ok"):
             available.append(model)
-    for provider, _ in PROVIDERS:
+    for provider, _, _ in PROVIDERS:
         for model in go_model_ids:
             candidate = f"{provider}/{model}"
             if cache.get(candidate, {}).get("ok"):

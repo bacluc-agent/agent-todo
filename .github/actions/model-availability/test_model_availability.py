@@ -34,7 +34,7 @@ class TestParseGoModelIds:
 
 
 class TestDiscoverModels:
-    def test_go_models_request_sends_user_agent(self, monkeypatch):
+    def test_per_provider_requests_with_auth(self, monkeypatch):
         class FakeResponse:
             def read(self):
                 return b'{"data": [{"id": "glm-5.2"}]}'
@@ -45,10 +45,10 @@ class TestDiscoverModels:
             def __exit__(self, *args):
                 return False
 
-        captured = {}
+        captured = []
 
         def fake_urlopen(request, timeout):
-            captured["request"] = request
+            captured.append(request)
             return FakeResponse()
 
         class FakeRunResult:
@@ -58,10 +58,48 @@ class TestDiscoverModels:
             model_availability.subprocess, "run", lambda *a, **k: FakeRunResult()
         )
         monkeypatch.setattr(model_availability.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setenv("OPENCODE_GO_API_KEY", "key1")
+        monkeypatch.setenv("OPENCODE_GO_2_API_KEY", "key2")
         free_models, go_model_ids = model_availability.discover_models()
         assert free_models == ["opencode/mimo-v2.5-free"]
         assert go_model_ids == ["glm-5.2"]
-        assert captured["request"].get_header("User-agent") == "curl/8.5.0"
+        assert len(captured) == 4  # one per provider
+        for req in captured:
+            assert req.get_header("User-agent") == "curl/8.5.0"
+            assert req.get_header("Authorization") in ("Bearer key1", "Bearer key2")
+        urls = [req.full_url for req in captured]
+        assert all(u == "https://opencode.ai/zen/go/v1/models" for u in urls)
+
+    def test_skips_providers_without_api_key(self, monkeypatch):
+        class FakeResponse:
+            def read(self):
+                return b'{"data": []}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        requests_made = []
+
+        def fake_urlopen(request, timeout):
+            requests_made.append(request)
+            return FakeResponse()
+
+        class FakeRunResult:
+            stdout = ""
+
+        monkeypatch.setattr(
+            model_availability.subprocess, "run", lambda *a, **k: FakeRunResult()
+        )
+        monkeypatch.setattr(model_availability.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
+        monkeypatch.delenv("OPENCODE_GO_2_API_KEY", raising=False)
+        free_models, go_model_ids = model_availability.discover_models()
+        assert free_models == []
+        assert go_model_ids == []
+        assert len(requests_made) == 0
 
 
 class TestBuildCandidates:
