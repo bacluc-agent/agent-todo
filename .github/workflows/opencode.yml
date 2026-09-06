@@ -62,25 +62,9 @@ jobs:
       - name: Set up OpenCode
         uses: ./.github/actions/setup-opencode
 
-      - name: Get model availability cache
-        id: get-cache
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
-        run: |
-          set -Eeuo pipefail
-          cache_json=$(gh issue view 49 --json body --jq '.body' 2>/dev/null || echo '{}')
-          {
-            printf 'cache<<CACHE_EOF\n'
-            printf '%s\n' "$cache_json"
-            printf 'CACHE_EOF\n'
-          } >> "$GITHUB_OUTPUT"
-
       - name: Check model availability
         id: model-availability
         uses: ./.github/actions/model-availability
-        with:
-          cache-json: ${{ steps.get-cache.outputs.cache }}
 
       - name: Select model
         id: select-model
@@ -147,9 +131,15 @@ jobs:
 
           fallback_model=''
           if [[ -n "$AVAILABLE_MODELS" ]]; then
-            fallback_model="$(printf '%s\n' "$AVAILABLE_MODELS" | head -n 1)"
+            mapfile -t verified_models < <(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF')
+            for candidate in "${verified_models[@]}"; do
+              if probe_model "$candidate"; then
+                fallback_model="$candidate"
+                break
+              fi
+            done
           fi
-          if [[ -z "$fallback_model" ]]; then
+          if [[ -z "$fallback_model" && -z "${REQUESTED_MODEL:-}" ]]; then
             printf '%s\n' 'No coordinator fallback model is available; not dispatching.' >&2
             exit 1
           fi
@@ -248,8 +238,17 @@ jobs:
             if [[ "$resolution" == ambiguous ]]; then
               printf 'Model resolution: ambiguous matches for %q: %s\n' "$requested_model" "$resolved" >&2
             fi
-            printf 'Model fallback: using action-verified model %q\n' "$fallback_model"
-            model="$fallback_model"
+            printf 'Model fallback: using %q\n' "$fallback_model"
+            IFS=$'\t' read -r fallback_resolution fallback_resolved < <(resolve_model "$fallback_model")
+            if [[ "$fallback_resolution" != available ]]; then
+              printf 'Model availability: fallback requested %q is unavailable (%s); cannot run coordinator.\n' "$fallback_model" "$fallback_resolution" >&2
+              if [[ "$fallback_resolution" == ambiguous ]]; then
+                printf 'Model resolution: ambiguous fallback matches for %q: %s\n' "$fallback_model" "$fallback_resolved" >&2
+              fi
+              exit 1
+            fi
+            printf 'Model availability: fallback requested %q is available; resolved model %q\n' "$fallback_model" "$fallback_resolved"
+            model="$fallback_resolved"
           fi
           printf '\n\n\n\n\n\n'
           printf 'Chosen model is %s\n' "$model"
