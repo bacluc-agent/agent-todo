@@ -86,9 +86,13 @@ jobs:
           if [[ ${#unique_prs[@]} -eq 0 || -z "${unique_prs[0]}" ]]; then
             printf '%s\n' 'No open PRs with review comments found.'
             {
-              echo "prs="
+              echo "prs<<PRS_EOF"
+              echo "[]"
+              echo "PRS_EOF"
               echo "count=0"
-              echo "pr_metadata={}"
+              echo "pr_metadata<<META_EOF"
+              echo "{}"
+              echo "META_EOF"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -121,9 +125,13 @@ jobs:
           done
 
           {
-            echo "prs=$(cat "$prs_file")"
+            echo "prs<<PRS_EOF"
+            cat "$prs_file"
+            echo "PRS_EOF"
             echo "count=${#unique_prs[@]}"
-            echo "pr_metadata=${pr_metadata}"
+            echo "pr_metadata<<META_EOF"
+            echo "$pr_metadata"
+            echo "META_EOF"
           } >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
@@ -140,5 +148,5 @@ jobs:
     with:
       prompt: ${{ fromJson(needs.find-prs.outputs.pr_metadata)[matrix.pr].prompt }}
       model: ${{ inputs.model }}
-      timeout_minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+      timeout_minutes: ${{ inputs.timeout_minutes || 120 }}
     secrets: inherit
