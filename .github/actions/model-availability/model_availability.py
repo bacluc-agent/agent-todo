@@ -21,7 +21,7 @@ PROVIDERS = (
     ("opencode-go-anthropic-2", "OPENCODE_GO_2_API_KEY"),
 )
 MAX_CONCURRENT = 5
-PROBE_TIMEOUT_SECONDS = 10
+PROBE_TIMEOUT_SECONDS = 60
 MODELS_ENDPOINT = "https://opencode.ai/zen/go/v1/models"
 PROBE_PROMPT = "Respond with exactly OK."
 
