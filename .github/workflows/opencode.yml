@@ -276,6 +276,7 @@ jobs:
           PROMPT: ${{ inputs.prompt }}
           MODEL: ${{ steps.select-model.outputs.model }}
           COORDINATOR_TIMEOUT: ${{ inputs.timeout_minutes || 120 }}
+          NO_OUTPUT_TIMEOUT_MINUTES: 15
           GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
           BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
@@ -289,10 +290,39 @@ jobs:
           printf 'Coordinator prompt:\n%s\n' "$PROMPT"
           printf '::%s::\n' "$stop_token"
           set +e
-          timeout "${COORDINATOR_TIMEOUT}m" opencode run --agent coordinator --model "$MODEL" --title "$coordinator_session_title" "$PROMPT" 2>&1 | tee "$RUNNER_TEMP/coordinator.out"
-          coordinator_statuses=("${PIPESTATUS[@]}")
-          coordinator_status=${coordinator_statuses[0]}
-          coordinator_tee_status=${coordinator_statuses[1]}
+          # Run the coordinator in its own process group so the watchdog can kill the whole tree.
+          # Watchdog enforces the total timeout and a no-output timeout: runs 34033234348 and
+          # 34037579162 produced zero output for the full 2h and only failed via the job timeout.
+          # shellcheck disable=SC2016 # $1-$4 are positional params of the inner bash, not outer expansions
+          setsid bash -c 'set -o pipefail; opencode run --agent coordinator --model "$1" --title "$2" "$3" 2>&1 | tee "$4"' _ "$MODEL" "$coordinator_session_title" "$PROMPT" "$RUNNER_TEMP/coordinator.out" &
+          coordinator_pipeline_pid=$!
+          start_time=$(date +%s)
+          last_size=0
+          idle_minutes=0
+          while kill -0 "$coordinator_pipeline_pid" 2>/dev/null; do
+            sleep 60
+            elapsed_minutes=$(( ($(date +%s) - start_time) / 60 ))
+            if (( elapsed_minutes >= COORDINATOR_TIMEOUT )); then
+              printf 'Coordinator exceeded %d minutes; killing.\n' "$COORDINATOR_TIMEOUT" >&2
+              kill -- "-$coordinator_pipeline_pid" 2>/dev/null
+              break
+            fi
+            current_size=$(stat -c %s "$RUNNER_TEMP/coordinator.out" 2>/dev/null || echo 0)
+            if (( current_size == last_size )); then
+              idle_minutes=$((idle_minutes + 1))
+              if (( idle_minutes >= NO_OUTPUT_TIMEOUT_MINUTES )); then
+                printf 'Coordinator produced no output for %d minutes; killing.\n' "$idle_minutes" >&2
+                kill -- "-$coordinator_pipeline_pid" 2>/dev/null
+                break
+              fi
+            else
+              idle_minutes=0
+              last_size=$current_size
+            fi
+          done
+          wait "$coordinator_pipeline_pid"
+          coordinator_status=$?
+          coordinator_tee_status=0
           set -e
           printf 'Coordinator statuses: opencode=%s tee=%s\n' "$coordinator_status" "$coordinator_tee_status"
           echo "coordinator_status=${coordinator_status}" >> "$GITHUB_OUTPUT"
