@@ -125,9 +125,12 @@ jobs:
           fi
 
           fallback_model=''
-          mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models" | awk '!seen[$0]++')
-          for candidate in "${free_models[@]}"; do
-            if probe_model "$candidate"; then
+          # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*)
+          # per model-discovery.md (provision-machines devel branch); they pass the trivial OK
+          # probe but fail as coordinator/selector in 10+ runs (e.g. 34029380869, 34042660858).
+          mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
+          for candidate in 'opencode/big-pickle' "${free_models[@]}"; do
+            if grep -Fxq "$candidate" "$available_models" && probe_model "$candidate"; then
               fallback_model="$candidate"
               break
             fi

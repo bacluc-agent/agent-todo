@@ -98,10 +98,14 @@ jobs:
           # Fetch model availability cache from issue #49
           cache_json=$(gh issue view 49 --json body --jq '.body' 2>/dev/null || echo '{}')
           selection_model=''
-          mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | awk '!seen[$0]++')
+          # Exclude known-weak free models (ling-3.0-flash-fin-free, mimo-v2.5-free, nemotron-*)
+          # per model-discovery.md (provision-machines devel branch); they pass the trivial OK
+          # probe but fail as coordinator/selector in 10+ runs (e.g. 34029380869, 34042660858).
+          mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | grep -Ev '/(ling-3\.0-flash-fin|mimo-v2\.5)-free$|/nemotron-' | awk '!seen[$0]++')
           for candidate in \
             'opencode-go-openai/qwen3.8-flash' \
             'opencode-go-openai-2/qwen3.8-flash' \
+            'opencode/big-pickle' \
             "${free_models[@]}"; do
             case "$candidate" in
               opencode-go-openai/qwen3.8-flash)
@@ -109,6 +113,9 @@ jobs:
                 ;;
               opencode-go-openai-2/qwen3.8-flash)
                 grep -Fxq "$candidate" "$available_models" && [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue
+                ;;
+              opencode/big-pickle)
+                grep -Fxq "$candidate" "$available_models" || continue
                 ;;
               opencode/*-free) ;;
               *) continue ;;
