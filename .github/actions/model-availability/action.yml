@@ -11,8 +11,9 @@ outputs:
     value: ${{ steps.check.outputs.cache-json }}
   available-models:
     description: >-
-      Newline-separated model IDs with ok=true in the merged cache, free
-      models first, then paid Go models
+      Newline-separated model IDs with ok=true in the merged cache, priority
+      Go models (glm-5.3, qwen3.8-max, kimi-k3) first, then remaining paid Go
+      models, then free models
     value: ${{ steps.check.outputs.available-models }}
 runs:
   using: composite

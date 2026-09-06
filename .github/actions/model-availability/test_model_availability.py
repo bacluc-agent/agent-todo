@@ -92,7 +92,7 @@ class TestMergeResults:
 
 
 class TestAvailableModels:
-    def test_free_first_then_paid(self):
+    def test_paid_before_free(self):
         cache = {
             "opencode-go-openai/glm-5.2": {"ok": True, "checked": "x"},
             "opencode/a-free": {"ok": True, "checked": "x"},
@@ -102,10 +102,47 @@ class TestAvailableModels:
         assert model_availability.available_models(
             cache, ["opencode/a-free", "opencode/b-free"], ["glm-5.2"]
         ) == [
-            "opencode/a-free",
             "opencode-go-openai/glm-5.2",
             "opencode-go-openai-2/glm-5.2",
+            "opencode/a-free",
         ]
+
+    def test_priority_models_first_across_providers(self):
+        cache = {
+            "opencode-go-openai/glm-5.3": {"ok": True, "checked": "x"},
+            "opencode-go-openai-2/glm-5.3": {"ok": True, "checked": "x"},
+            "opencode-go-openai/qwen3.8-max": {"ok": True, "checked": "x"},
+            "opencode-go-openai-2/kimi-k3": {"ok": True, "checked": "x"},
+            "opencode-go-openai/glm-5.2": {"ok": True, "checked": "x"},
+            "opencode/a-free": {"ok": True, "checked": "x"},
+        }
+        assert model_availability.available_models(
+            cache,
+            ["opencode/a-free"],
+            ["glm-5.2", "glm-5.3", "qwen3.8-max", "kimi-k3"],
+        ) == [
+            "opencode-go-openai/glm-5.3",
+            "opencode-go-openai-2/glm-5.3",
+            "opencode-go-openai/qwen3.8-max",
+            "opencode-go-openai-2/kimi-k3",
+            "opencode-go-openai/glm-5.2",
+            "opencode/a-free",
+        ]
+
+    def test_falls_back_to_free_when_no_paid_available(self):
+        cache = {"opencode/a-free": {"ok": True, "checked": "x"}}
+        assert model_availability.available_models(
+            cache, ["opencode/a-free"], []
+        ) == ["opencode/a-free"]
+
+    def test_priority_model_missing_from_go_model_ids_is_skipped(self):
+        cache = {
+            "opencode-go-openai/glm-5.3": {"ok": True, "checked": "x"},
+            "opencode-go-openai/glm-5.2": {"ok": True, "checked": "x"},
+        }
+        assert model_availability.available_models(
+            cache, [], ["glm-5.2"]
+        ) == ["opencode-go-openai/glm-5.2"]
 
 
 class TestReadCache:
