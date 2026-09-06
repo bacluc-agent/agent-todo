@@ -21,14 +21,7 @@ You read a list of open issue candidates plus selection rules in the user messag
 
 ## Available Plugins and Skills
 
-Before selecting an issue, discover what plugins and skills are available:
-
-1. **Read `.opencode/package.json`** to identify installed plugins (e.g., `@opencode-ai/plugin` version 1.18.21).
-2. **Use `glob`** to find any `.md` or `.skill` files under `.opencode/` that represent available skills or agent definitions.
-3. **Use `webfetch`** to check the provision-machines repo (`https://github.com/bacluc/provision-machines`) at `deploys/development_tools/ai_agent_devcontainer/files/claude/skills/` for available skills listed in `SKILL.md` files. Known skills include `playwright-cli` (browser automation) and `using-git-worktrees` (isolated workspace setup).
-4. **Use `gh`** to list relevant repos or content if needed.
-
-Present the discovered plugins and skills as a formatted list in the output, so the user can see what's available before an issue is selected. Then proceed with the normal issue selection flow.
+The available OpenCode plugins and skills are listed in the user message under "Available OpenCode plugins:" and "Available OpenCode skills:". Use them to assess which issues are feasible; do not discover them yourself.
 
 ## Constraints
 

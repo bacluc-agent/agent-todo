@@ -41,13 +41,25 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up OpenCode
+        id: setup
         uses: ./.github/actions/setup-opencode
+
+      - name: Show available plugins and skills
+        shell: bash
+        env:
+          PLUGINS_SKILLS_SUMMARY: ${{ steps.setup.outputs.plugins-skills-summary }}
+        run: |
+          printf '\n\n\n\n\n\n'
+          printf '%s\n' 'Available OpenCode plugins and skills:'
+          printf '%s\n' "$PLUGINS_SKILLS_SUMMARY"
+          printf '\n\n\n\n\n\n'
 
       - name: Pick issue and dispatch
         id: pick
         shell: bash
         env:
           SELECTION_PROMPT: ${{ inputs.selection_prompt }}
+          PLUGINS_SKILLS_SUMMARY: ${{ steps.setup.outputs.plugins-skills-summary }}
         run: |
           set -Eeuo pipefail
 
@@ -144,6 +156,7 @@ jobs:
             printf '%s\n' 'Open issue candidates in this repository (number: title, oldest first):'
             jq -r '.[] | "\(.number): \(.title)"' "$search_json"
             printf '%s\n' "$tail_instruction"
+            printf '%s\n' "$PLUGINS_SKILLS_SUMMARY"
           } > "$prompt"
 
           selection="$RUNNER_TEMP/selection.out"

@@ -50,13 +50,25 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up OpenCode
+        id: setup
         uses: ./.github/actions/setup-opencode
+
+      - name: Show available plugins and skills
+        shell: bash
+        env:
+          PLUGINS_SKILLS_SUMMARY: ${{ steps.setup.outputs.plugins-skills-summary }}
+        run: |
+          printf '\n\n\n\n\n\n'
+          printf '%s\n' 'Available OpenCode plugins and skills:'
+          printf '%s\n' "$PLUGINS_SKILLS_SUMMARY"
+          printf '\n\n\n\n\n\n'
 
       - name: Select model and run coordinator
         shell: bash
         env:
           PROMPT: ${{ inputs.prompt }}
           REQUESTED_MODEL: ${{ inputs.model }}
+          PLUGINS_SKILLS_SUMMARY: ${{ steps.setup.outputs.plugins-skills-summary }}
           GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
           BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
@@ -251,7 +263,7 @@ jobs:
           printf '\n\n\n\n\n\n'
 
           coordinator_session_title='coordinator-run'
-          PROMPT=$(printf 'model: %s \n %s' "$model" "$PROMPT")
+          PROMPT=$(printf 'model: %s \n %s\n\n%s' "$model" "$PROMPT" "$PLUGINS_SKILLS_SUMMARY")
           printf 'Final coordinator command: opencode run --agent coordinator --model %q --title %q\n' "$model" "$coordinator_session_title"
           stop_token="$(openssl rand -hex 8)"
           printf '::stop-commands::%s\n' "$stop_token"
