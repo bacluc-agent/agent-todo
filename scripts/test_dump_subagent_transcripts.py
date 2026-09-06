@@ -150,9 +150,13 @@ class TestMain:
 
         monkeypatch.setattr(dump_subagent_transcripts, "run_opencode", fake_run_opencode)
         assert dump_subagent_transcripts.main() == 0
-        out = capsys.readouterr().out
-        assert "Coordinator run used no subagents." in out
-        assert "::stop-commands::" not in out
+        out_lines = capsys.readouterr().out.splitlines()
+        assert re.fullmatch(r"::stop-commands::[0-9a-f]{64}", out_lines[0])
+        token = out_lines[0].removeprefix("::stop-commands::")
+        assert out_lines[-1] == f"::{token}::"
+        assert "--- Coordinator transcript: coordinator (ses_root) ---" in out_lines
+        assert "[coordinator] all by myself" in out_lines
+        assert "(No subagents were spawned.)" in out_lines
 
     def test_renders_child_transcripts_fenced(self, monkeypatch, capsys):
         monkeypatch.setenv("COORDINATOR_SESSION_TITLE", "coordinator-run")
@@ -224,6 +228,8 @@ class TestMain:
         assert out_lines[-1] == f"::{token}::"
         compact_input = '{"command":"echo ' + "x" * 300 + '"}'
         assert out_lines[1:-1] == [
+            "--- Coordinator transcript: coordinator (ses_root) ---",
+            "[coordinator] delegating now",
             "--- Subagent transcript: planner (ses_child1) ---",
             "[planner:tool] bash " + compact_input[:200] + "...[truncated]",
             "  output: " + "y" * 500 + "...[truncated]",
@@ -231,8 +237,25 @@ class TestMain:
         ]
         assert "hidden-chain-of-thought" not in out
         assert ":tool] task" not in out
-        assert "delegating now" not in out
         assert "grandchild" not in out
+
+    def test_export_failure_prints_note(self, monkeypatch, capsys):
+        monkeypatch.setenv("COORDINATOR_SESSION_TITLE", "coordinator-run")
+        sessions = json.dumps([{"id": "ses_root", "title": "coordinator-run"}])
+
+        def fake_run_opencode(*args):
+            if args[0] == "session":
+                return sessions
+            raise subprocess.CalledProcessError(1, args)
+
+        monkeypatch.setattr(dump_subagent_transcripts, "run_opencode", fake_run_opencode)
+        assert dump_subagent_transcripts.main() == 0
+        out_lines = capsys.readouterr().out.splitlines()
+        assert re.fullmatch(r"::stop-commands::[0-9a-f]{64}", out_lines[0])
+        token = out_lines[0].removeprefix("::stop-commands::")
+        assert out_lines[-1] == f"::{token}::"
+        assert "--- Coordinator transcript: export failed ---" in out_lines
+        assert "(No subagents were spawned.)" in out_lines
 
 
 class TestRunOpencode:
