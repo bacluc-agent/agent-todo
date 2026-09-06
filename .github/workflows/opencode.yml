@@ -100,7 +100,7 @@ jobs:
 
           fallback_model=''
           if [[ -n "$AVAILABLE_MODELS" ]]; then
-            fallback_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF' | head -n 1)"
+            fallback_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF { print; exit }')"
           fi
           if [[ -z "$fallback_model" && -z "${REQUESTED_MODEL:-}" ]]; then
             printf '%s\n' 'No coordinator fallback model is available; not dispatching.' >&2

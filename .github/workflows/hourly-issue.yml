@@ -88,7 +88,7 @@ jobs:
 
           selection_model=''
           if [[ -n "$AVAILABLE_MODELS" ]]; then
-            selection_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF' | head -n 1)"
+            selection_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF { print; exit }')"
           fi
           if [[ -z "$selection_model" ]]; then
             printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
