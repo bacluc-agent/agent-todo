@@ -92,6 +92,9 @@ jobs:
             fi
             ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
           }
+          printf '\n\n\n\n\n\n'
+          printf 'Choosing model...\n'
+          printf '\n\n\n\n\n\n'
 
           available_models="$RUNNER_TEMP/opencode-models.out"
           printf '%s\n' 'Model availability command: opencode models'
@@ -241,6 +244,10 @@ jobs:
             printf 'Model availability: fallback requested %q is available; resolved model %q\n' "$fallback_model" "$fallback_resolved"
             model="$fallback_resolved"
           fi
+          printf '\n\n\n\n\n\n'
+          printf 'Chosen model is %s\n' "$model"
+          printf 'Now dispatching agent\n'
+          printf '\n\n\n\n\n\n'
 
           coordinator_session_title='coordinator-run'
           PROMPT=$(printf 'model: %s \n %s' "$model" "$PROMPT")

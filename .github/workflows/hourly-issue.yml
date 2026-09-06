@@ -58,6 +58,10 @@ jobs:
           gh label create agent-running -R "$GITHUB_REPOSITORY" \
             --color 0E8A16 --description 'Selected by the hourly issue runner' --force
 
+          printf '\n\n\n\n\n\n'
+          printf 'Fetching github issues...\n'
+          printf '\n\n\n\n\n\n'
+
           # gh issue list -S returns nothing for no:label:<name> (gh client filter); the search API works.
           # Oldest-first: the 50-item page keeps the OLDEST 50 unclaimed issues instead of the
           # newest 50, so backlog items beyond the cap are the newest, not the oldest.
@@ -73,6 +77,9 @@ jobs:
           fi
           printf 'Unclaimed candidate issues (oldest first):\n'
           cat "$candidates"
+          printf '\n\n\n\n\n\n'
+          printf 'Selecting model...\n'
+          printf '\n\n\n\n\n\n'
 
           available_models="$RUNNER_TEMP/opencode-models.out"
           set +e
@@ -125,6 +132,9 @@ jobs:
             exit 1
           fi
           printf 'Issue selection model: %s\n' "$selection_model"
+          printf '\n\n\n\n\n\n'
+          printf 'Choosing issue...\n'
+          printf '\n\n\n\n\n\n'
 
           default_tail="$(cat scripts/issue-selection-tail.txt)"
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
