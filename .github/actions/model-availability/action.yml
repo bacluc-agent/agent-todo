@@ -1,0 +1,27 @@
+name: Check model availability
+description: >-
+  Probes every model of every OpenCode Go provider (plus free models) for
+  availability and merges the results into the model-availability cache
+  stored on issue #49. Available models cache for 24 hours, failed models
+  for 2 hours. Relies on the job-level OPENCODE_GO_API_KEY and
+  OPENCODE_GO_2_API_KEY env vars set by the caller.
+outputs:
+  cache-json:
+    description: Merged cache JSON (current cache plus fresh probe results)
+    value: ${{ steps.check.outputs.cache-json }}
+  available-models:
+    description: >-
+      Newline-separated model IDs with ok=true in the merged cache, free
+      models first, then paid Go models
+    value: ${{ steps.check.outputs.available-models }}
+runs:
+  using: composite
+  steps:
+    - name: Check model availability
+      id: check
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        printf '::add-mask::%s\n' "${OPENCODE_GO_API_KEY:-}"
+        printf '::add-mask::%s\n' "${OPENCODE_GO_2_API_KEY:-}"
+        python3 "${{ github.action_path }}/model_availability.py"

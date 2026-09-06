@@ -43,11 +43,17 @@ jobs:
       - name: Set up OpenCode
         uses: ./.github/actions/setup-opencode
 
+      - name: Check model availability
+        id: model-availability
+        uses: ./.github/actions/model-availability
+
       - name: Pick issue and dispatch
         id: pick
         shell: bash
         env:
           SELECTION_PROMPT: ${{ inputs.selection_prompt }}
+          AVAILABLE_MODELS: ${{ steps.model-availability.outputs.available-models }}
+          CACHE_JSON: ${{ steps.model-availability.outputs.cache-json }}
         run: |
           set -Eeuo pipefail
 
@@ -81,74 +87,40 @@ jobs:
           printf 'Selecting model...\n'
           printf '\n\n\n\n\n\n'
 
-          available_models="$RUNNER_TEMP/opencode-models.out"
-          set +e
-          timeout 10m opencode models 2>&1 | tee "$available_models"
-          availability_statuses=("${PIPESTATUS[@]}")
-          availability_status=${availability_statuses[0]}
-          availability_tee_status=${availability_statuses[1]}
-          set -e
-          if (( availability_tee_status != 0 )); then
-            exit "$availability_tee_status"
-          fi
-          if (( availability_status != 0 )); then
-            printf 'Unable to verify model availability; not dispatching.\n' >&2
-            exit "$availability_status"
-          fi
-          # Fetch model availability cache from issue #49
-          cache_json=$(gh issue view 49 --json body --jq '.body' 2>/dev/null || echo '{}')
-          selection_model=''
-          mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | awk '!seen[$0]++')
-          for candidate in \
-            'opencode-go-openai/qwen3.8-flash' \
-            'opencode-go-openai-2/qwen3.8-flash' \
-            "${free_models[@]}"; do
-            case "$candidate" in
-              opencode-go-openai/qwen3.8-flash)
-                grep -Fxq "$candidate" "$available_models" && [[ -n "$OPENCODE_GO_API_KEY" ]] || continue
-                ;;
-              opencode-go-openai-2/qwen3.8-flash)
-                grep -Fxq "$candidate" "$available_models" && [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue
-                ;;
-              opencode/*-free) ;;
-              *) continue ;;
-            esac
-            # Check cache for this candidate
-            cache_entry=$(echo "$cache_json" | jq -r --arg model "$candidate" '.[$model] // empty')
-            if [[ -n "$cache_entry" ]]; then
-              cache_ok=$(echo "$cache_entry" | jq -r '.ok')
-              cache_checked=$(echo "$cache_entry" | jq -r '.checked')
-              cache_time=$(date -d "$cache_checked" +%s 2>/dev/null || echo 0)
-              current_time=$(date +%s)
-              age_hours=$(( (current_time - cache_time) / 3600 ))
-              if (( age_hours < 2 )); then
-                if [[ "$cache_ok" == "true" ]]; then
-                  selection_model="$candidate"
-                  break
-                else
-                  continue
-                fi
-              fi
-            fi
+          probe_model() {
+            local candidate="$1" probe_output statuses probe_status tee_status
             probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
             printf 'Model probe command: timeout 60s opencode --pure run --dir %q --model %q\n' "$RUNNER_TEMP" "$candidate"
             printf 'Model probe prompt: %s\n' 'Respond with exactly OK.'
             set +e
             timeout 60s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
-            probe_statuses=("${PIPESTATUS[@]}")
+            statuses=("${PIPESTATUS[@]}")
             set -e
-            probe_status=${probe_statuses[0]}
-            probe_tee_status=${probe_statuses[1]}
-            printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$probe_tee_status"
-            probe_text="$(< "$probe_output")"
-            if (( probe_status == 0 && probe_tee_status == 0 )) && printf '%s' "$probe_text" | grep -qE '^[[:space:]]*OK\.?[[:space:]]*$'; then
-                selection_model="$candidate"
-                # Update cache with successful probe result
-                new_cache=$(echo "$cache_json" | jq --arg model "$candidate" --arg checked "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {($model): {"ok": true, "checked": $checked}}')
-                gh issue edit 49 --body "$new_cache"
-                break
+            probe_status=${statuses[0]}
+            tee_status=${statuses[1]}
+            printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$tee_status"
+            probe_text="$(sed $'s/\033\\[[0-9;]*[[:alpha:]]//g' "$probe_output")"
+            if ((probe_status == 0 && tee_status == 0)) && grep -Eq '^[[:space:]]*OK\.?[[:space:]]*$' <<<"$probe_text"; then
+              return 0
             fi
-          done
+            ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
+          }
+
+          selection_model=''
+          if [[ -n "$AVAILABLE_MODELS" ]]; then
+            mapfile -t available_models < <(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF')
+            for candidate in "${available_models[@]}"; do
+              cache_entry=$(echo "$CACHE_JSON" | jq -r --arg model "$candidate" '.[$model] // empty')
+              if [[ -n "$cache_entry" ]] && [[ "$(echo "$cache_entry" | jq -r '.ok')" == "true" ]]; then
+                selection_model="$candidate"
+                break
+              fi
+              if probe_model "$candidate"; then
+                selection_model="$candidate"
+                break
+              fi
+            done
+          fi
           if [[ -z "$selection_model" ]]; then
             printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
             exit 1
