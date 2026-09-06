@@ -33,6 +33,11 @@ jobs:
       OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
       OPENCODE_GO_2_API_KEY: ${{ secrets.OPENCODE_GO_2_API_KEY }}
 
+      # Known broken providers excluded from model selection (issue #16)
+      BROKEN_PROVIDERS: "vshn-us-ai"
+      # Known broken models excluded from model selection (issue #16)
+      BROKEN_MODELS: "grok-4.6,mimo-v2-omni,omen-alpha"
+
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,11 +48,51 @@ jobs:
       - name: Set up OpenCode
         uses: ./.github/actions/setup-opencode
 
+      - name: Log available models and probe results
+        id: log-models
+        shell: bash
+        env:
+          BROKEN_PROVIDERS: ${{ env.BROKEN_PROVIDERS }}
+          BROKEN_MODELS: ${{ env.BROKEN_MODELS }}
+        run: |
+          printf '=== Available Models ===\n'
+          available_models="$RUNNER_TEMP/opencode-models.out"
+          set +e
+          timeout 10m opencode models 2>&1 | tee "$available_models"
+          set -e
+          printf '\n=== Broken Providers: %s ===\n' "$BROKEN_PROVIDERS"
+          printf '\n=== Broken Models: %s ===\n' "$BROKEN_MODELS"
+          printf '\n=== Filtered Model List ===\n'
+          grep -Eo 'opencode/[^[:space:]]+' "$available_models" | awk '!seen[$0]++' | while read -r model; do
+            provider="$(echo "$model" | cut -d'/' -f1)"
+            model_name="$(echo "$model" | cut -d'/' -f2-)"
+            skip=0
+            for broken in $(echo "$BROKEN_PROVIDERS" | tr ',' ' '); do
+              if [[ "$provider" == *"$broken"* ]]; then
+                printf 'EXCLUDED (broken provider): %s\n' "$model"
+                skip=1
+                break
+              fi
+            done
+            [[ "$skip" == "1" ]] && continue
+            for broken in $(echo "$BROKEN_MODELS" | tr ',' ' '); do
+              if [[ "$model_name" == *"$broken"* ]]; then
+                printf 'EXCLUDED (broken model): %s\n' "$model"
+                skip=1
+                break
+              fi
+            done
+            [[ "$skip" == "1" ]] && continue
+            printf 'AVAILABLE: %s\n' "$model"
+          done
+
       - name: Pick issue and dispatch
         id: pick
         shell: bash
         env:
           SELECTION_PROMPT: ${{ inputs.selection_prompt }}
+          BROKEN_PROVIDERS: ${{ env.BROKEN_PROVIDERS }}
+          BROKEN_MODELS: ${{ env.BROKEN_MODELS }}
         run: |
           set -Eeuo pipefail
 
@@ -82,6 +127,7 @@ jobs:
           availability_tee_status=${availability_statuses[1]}
           set -e
           if (( availability_tee_status != 0 )); then
+            printf 'Model availability command failed (tee=%s). Check model probe logs above.\n' "$availability_tee_status" >&2
             exit "$availability_tee_status"
           fi
           if (( availability_status != 0 )); then
@@ -90,6 +136,7 @@ jobs:
           fi
           selection_model=''
           mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | awk '!seen[$0]++')
+          probe_errors=()
           for candidate in \
             'opencode-go-openai/qwen3.8-flash' \
             'opencode-go-openai-2/qwen3.8-flash' \
@@ -104,6 +151,25 @@ jobs:
               opencode/*-free) ;;
               *) continue ;;
             esac
+            # Skip broken providers and models
+            provider="$(echo "$candidate" | cut -d'/' -f1)"
+            model_name="$(echo "$candidate" | cut -d'/' -f2-)"
+            skip=0
+            for broken in $(echo "$BROKEN_PROVIDERS" | tr ',' ' '); do
+              if [[ "$provider" == *"$broken"* ]]; then
+                skip=1
+                break
+              fi
+            done
+            [[ "$skip" == "1" ]] && continue
+            for broken in $(echo "$BROKEN_MODELS" | tr ',' ' '); do
+              if [[ "$model_name" == *"$broken"* ]]; then
+                skip=1
+                break
+              fi
+            done
+            [[ "$skip" == "1" ]] && continue
+
             probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
             printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q\n' "$RUNNER_TEMP" "$candidate"
             printf 'Model probe prompt: %s\n' 'Respond with exactly OK.'
@@ -118,13 +184,29 @@ jobs:
             if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$probe_text" =~ ^[[:space:]]*OK\.?[[:space:]]*$ ]]; then
               selection_model="$candidate"
               break
+            else
+              probe_errors+=("$candidate: opencode=$probe_status tee=$probe_tee_status text=$probe_text")
+              printf 'Model probe FAILED for %s: opencode=%s tee=%s text=%s\n' "$candidate" "$probe_status" "$probe_tee_status" "$probe_text" >&2
             fi
           done
           if [[ -z "$selection_model" ]]; then
+            printf '%s\n' 'All model probes failed. Error summary:' >&2
+            for err in "${probe_errors[@]}"; do
+              printf '  - %s\n' "$err" >&2
+            done
             printf '%s\n' 'No issue-selection model is available; not dispatching.' >&2
             exit 1
           fi
           printf 'Issue selection model: %s\n' "$selection_model"
+
+          # PR deduplication: check if a PR already exists for this issue
+          issue_number="$(jq -r '.[0].number | tostring' "$search_json")"
+          issue_branch="issue-${issue_number}"
+          existing_pr="$(gh pr list --state all --head "$issue_branch" --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          if [[ -n "$existing_pr" ]]; then
+            printf 'PR #%s already exists for issue #%s (branch %s). Skipping dispatch.\n' "$existing_pr" "$issue_number" "$issue_branch" >&2
+            exit 0
+          fi
 
           default_tail="$(cat scripts/issue-selection-tail.txt)"
           tail_instruction="${SELECTION_PROMPT:-$default_tail}"
@@ -145,6 +227,7 @@ jobs:
           set -e
           printf 'Model selection statuses: opencode=%s tee=%s\n' "$selection_status" "$selection_tee_status"
           if (( selection_tee_status != 0 )); then
+            printf 'Selection tee failed. Check stderr logs for details.\n' >&2
             exit "$selection_tee_status"
           fi
           if (( selection_status != 0 )); then

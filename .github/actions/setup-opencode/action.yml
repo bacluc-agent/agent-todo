@@ -16,6 +16,7 @@ runs:
       env:
         SOURCE_REPOSITORY: https://github.com/bacluc/provision-machines.git
         CONFIG_PATH: deploys/development_tools/ai_agent_devcontainer/files/opencode
+        SKILLS_PATH: deploys/development_tools/ai_agent_devcontainer/files/claude/skills
       run: |
         set -Eeuo pipefail
 
@@ -57,6 +58,17 @@ runs:
         rm -rf "$config_dir"
         cp -a "$source_dir/$CONFIG_PATH" "$config_dir"
 
+        if [[ ! -d "$source_dir/$SKILLS_PATH" ]]; then
+          printf 'Missing skills directory: %s\n' "$SKILLS_PATH" >&2
+          exit 1
+        fi
+        if [[ -z "$(compgen -G "$source_dir/$SKILLS_PATH/*/SKILL.md" 2>/dev/null)" ]]; then
+          printf 'No SKILL.md files found in skills directory: %s\n' "$SKILLS_PATH" >&2
+          exit 1
+        fi
+        cp -a "$source_dir/$SKILLS_PATH" "$config_dir/skills"
+        printf 'Copied skills: %s\n' "$(ls "$config_dir/skills" | tr '\n' ' ')"
+
         python3 - "$config_dir" <<'PY'
         import pathlib
         import re
@@ -89,11 +101,35 @@ runs:
         text, count = pattern.subn(add_api_key, text)
         if count != 4:
             raise SystemExit(f"Expected four OpenCode Go providers, found {count}")
+
+        # Disable the vshn-us-ai provider: all models failed during probing
+        # due to broken baseURL ("undefined/chat/completions")
+        text = text.replace(
+            '"vshn-us-ai": {\n      "npm": "@ai-sdk/openai-compatible",\n      "name": "VSHN US AI",',
+            '"vshn-us-ai": {\n      "npm": "@ai-sdk/openai-compatible",\n      "name": "VSHN US AI",\n      "disabled": true,'
+        )
+
+        # Add a comment about known-broken models if not already present
+        if "Known broken models" not in text:
+            text = text.replace(
+                '"provider": {',
+                '// Known broken models from failed run 34011838269:\n'
+                '// - vshn-us-ai: broken baseURL ("undefined/chat/completions")\n'
+                '// - opencode-go-openai: grok-4.6 fails with "not supported for format oa-compat"\n'
+                '// - opencode-go-anthropic-2: models fail with server errors\n'
+                '"provider": {'
+            )
+
         config.write_text(text)
 
+        # model-discovery.md is expected in the provision-machines repo's config directory.
+        # If it's missing, log a warning but do not fail the setup, as the file may not
+        # exist in all versions of the provision-machines repo.
         discovery = root / "agents" / "model-discovery.md"
         if not discovery.exists():
-            raise SystemExit(f"Missing model-discovery agent file: {discovery}")
+            print(f"Warning: model-discovery agent file not found at {discovery}; skipping agent config step")
+        else:
+            discovery.write_text(discovery.read_text())
         PY
 
         mkdir -p "$HOME/.config"

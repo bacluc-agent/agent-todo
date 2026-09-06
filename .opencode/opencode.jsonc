@@ -1,0 +1,343 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "*": "allow",
+  },
+  "plugin": [
+    // renovate: datasource=npm depName=@dietrichgebert/ponytail
+    "@dietrichgebert/ponytail@4.9.0",
+    // renovate: datasource=npm depName=opencode-gemini-auth
+    "opencode-gemini-auth@1.4.15",
+    // renovate: datasource=npm depName=bacluc-opencode-completion-check-command
+    "bacluc-opencode-completion-check-command@0.9.7",
+    [
+      // renovate: datasource=npm depName=opencode-auto-resume
+      "opencode-auto-resume@1.1.10",
+      {
+        "chunkTimeoutMs": 300000,
+        "maxRetries": 10,
+      },
+    ],
+  ],
+  "default_agent": "coordinator",
+  "agent": {
+    "build": {
+      "mode": "all",
+    },
+    "general": {
+      "disable": true,
+    },
+    "explore": {
+      "disable": true,
+    },
+  },
+  // Broken providers and models from failed run 34011838269:
+  // - vshn-us-ai: all models failed during probing due to broken baseURL ("undefined/chat/completions")
+  // - opencode-go-openai: grok-4.6 fails with "not supported for format oa-compat"
+  // - opencode-go-anthropic-2: models fail with server errors
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": {
+        "baseURL": "http://host.docker.internal:11434/v1",
+      },
+      "models": {
+        "gpt-oss:20b-mmap": {
+          "name": "gpt-oss:20b-mmap",
+        },
+        "qwen2.5:3b": {
+          "name": "qwen2.5:3b",
+        },
+        "qwen2.5:3b-mmap": {
+          "name": "qwen2.5:3b-mmap",
+        },
+        "ministral-3:3b": {
+          "name": "ministral-3:3b",
+        },
+        "mistral:7b-mmap": {
+          "name": "mistral:7b-mmap",
+        },
+        "gpt-oss:20b": {
+          "name": "gpt-oss:20b",
+        },
+        "mistral:7b": {
+          "name": "mistral:7b",
+        },
+        "gemma4:31b": {
+          "name": "gemma4:31b",
+        },
+      },
+    },
+    "opencode-go-anthropic": {
+      "npm": "@ai-sdk/anthropic",
+      "name": "opencode-go-anthropic",
+      "options": {
+        "baseURL": "https://opencode.ai/zen/go/v1/messages",
+      },
+      "models": {
+        "minimax-m2.7": {
+          "name": "minimax-m2.7",
+        },
+        "minimax-m2.5": {
+          "name": "minimax-m2.5",
+        },
+        "qwen3.7-max": {
+          "name": "qwen3.7-max",
+        },
+        "qwen3.6-plus": {
+          "name": "qwen3.6-plus",
+        },
+        "minimax-m3": {
+          "name": "minimax-m3",
+        },
+        "qwen3.8-max": {
+          "name": "qwen3.8-max",
+        },
+        "qwen3.7-plus": {
+          "name": "qwen3.7-plus",
+        },
+      },
+    },
+    "opencode-go-openai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "opencode-go-openai",
+      "options": {
+        "baseURL": "https://opencode.ai/zen/go/v1",
+      },
+      "models": {
+        "glm-5.2": {
+          "name": "glm-5.2",
+        },
+        "glm-5.1": {
+          "name": "glm-5.1",
+        },
+        "kimi-k2.6": {
+          "name": "kimi-k2.6",
+        },
+        "kimi-k2.7-code": {
+          "name": "kimi-k2.7-code",
+        },
+        "kimi-k3": {
+          "name": "kimi-k3",
+        },
+        "mimo-v2.5": {
+          "name": "mimo-v2.5",
+        },
+        "mimo-v2.5-pro": {
+          "name": "mimo-v2.5-pro",
+        },
+        // Known broken: grok-4.6 fails with "not supported for format oa-compat"
+        "grok-4.5": {
+          "name": "grok-4.5",
+        },
+        "deepseek-v4-pro": {
+          "name": "deepseek-v4-pro",
+        },
+        "deepseek-v4-flash": {
+          "name": "deepseek-v4-flash",
+        },
+        "hy3": {
+          "name": "hy3",
+        },
+        "gpt-5.6-luna": {
+          "name": "gpt-5.6-luna",
+          "provider": {
+            "npm": "@ai-sdk/openai",
+          },
+        },
+      },
+    },
+    "opencode-go-anthropic-2": {
+      "npm": "@ai-sdk/anthropic",
+      "name": "opencode-go-anthropic-2",
+      "options": {
+        "baseURL": "https://opencode.ai/zen/go/v1/messages",
+      },
+      // Known broken: models in this provider fail with server errors
+      "models": {
+        "minimax-m2.7": {
+          "name": "minimax-m2.7",
+        },
+        "minimax-m2.5": {
+          "name": "minimax-m2.5",
+        },
+        "qwen3.7-max": {
+          "name": "qwen3.7-max",
+        },
+        "qwen3.6-plus": {
+          "name": "qwen3.6-plus",
+        },
+        "minimax-m3": {
+          "name": "minimax-m3",
+        },
+        "qwen3.8-max": {
+          "name": "qwen3.8-max",
+        },
+        "qwen3.7-plus": {
+          "name": "qwen3.7-plus",
+        },
+      },
+    },
+    "opencode-go-openai-2": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "opencode-go-openai-2",
+      "options": {
+        "baseURL": "https://opencode.ai/zen/go/v1",
+      },
+      "models": {
+        "glm-5.2": {
+          "name": "glm-5.2",
+        },
+        "glm-5.1": {
+          "name": "glm-5.1",
+        },
+        "kimi-k2.6": {
+          "name": "kimi-k2.6",
+        },
+        "kimi-k2.7-code": {
+          "name": "kimi-k2.7-code",
+        },
+        "kimi-k3": {
+          "name": "kimi-k3",
+        },
+        "mimo-v2.5": {
+          "name": "mimo-v2.5",
+        },
+        "mimo-v2.5-pro": {
+          "name": "mimo-v2.5-pro",
+        },
+        "grok-4.5": {
+          "name": "grok-4.5",
+        },
+        "deepseek-v4-pro": {
+          "name": "deepseek-v4-pro",
+        },
+        "deepseek-v4-flash": {
+          "name": "deepseek-v4-flash",
+        },
+        "hy3": {
+          "name": "hy3",
+        },
+        "gpt-5.6-luna": {
+          "name": "gpt-5.6-luna",
+          "provider": {
+            "npm": "@ai-sdk/openai",
+          },
+        },
+      },
+    },
+    "cortecs2": {
+      "options": {
+        "baseURL": "https://api.cortecs.ai/v1",
+      },
+      "models": {
+        "kimi-k2.6": {
+          "name": "kimi",
+        },
+        "glm-5.1": {
+          "name": "glm-5.1",
+        },
+        "glm-5": {
+          "name": "glm-5",
+        },
+        "glm-4.6": {
+          "name": "glm-4.6",
+        },
+        "minimax-m2.7": {
+          "name": "minimax-m2.7",
+        },
+        "devstral-2512": {
+          "name": "devstral-2512",
+        },
+        "qwen3.5-397b-a17b": {
+          "name": "qwen3.5-397b-a17b",
+        },
+        "gpt-oss-120b": {
+          "name": "gpt-oss-120b",
+        },
+      },
+    },
+    "requesty2": {
+      "options": {
+        "baseURL": "https://router.requesty.ai/v1",
+      },
+      "models": {
+        "google/gemini-3-pro-preview": {
+          "name": "gemini-3-pro-preview",
+        },
+        "google/gemini-3.1-pro-preview": {
+          "name": "gemini-3.1-pro-preview",
+        },
+        "anthropic/claude-opus-4-6": {
+          "name": "claude-opus-4-6",
+        },
+        "nebius/moonshotai/kimi-k2.5": {
+          "name": "kimi-2.5",
+        },
+        "zai/GLM-4.5": {
+          "name": "zai/glm-4.5",
+        },
+      },
+    },
+    // vshn-us-ai is disabled: all models failed during probing due to broken baseURL ("undefined/chat/completions")
+    "vshn-us-ai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "VSHN US AI",
+      "disabled": true,
+      "models": {
+        "-claude-haiku-v45": {
+          "name": "Claude Haiku 4.5 (preset)",
+        },
+        "-claude-sonnet-v46": {
+          "name": "Claude Sonnet 4.6 (preset)",
+        },
+        "byusage.alibaba/qwen-max": {
+          "name": "qwen-max (byusage)",
+        },
+        "byusage.moonshot/kimi-k3": {
+          "name": "byusage.moonshot/kimi-k3",
+        },
+        "expensive.gemini-3-flash": {
+          "name": "gemini-3-flash (expensive)",
+        },
+        "expensive.gpt-5.5": {
+          "name": "GPT-5.5 (expensive)",
+        },
+        "openrouter.deepseek/deepseek-chat-v3.1": {
+          "name": "deepseek-v3.1 (openrouter)",
+        },
+        "subscription.glm-5.2": {
+          "name": "glm-5.2 (subscription)",
+        },
+        "subscription.kimi-k2.6": {
+          "name": "kimi-k2.6",
+        },
+        "subscription.kimi-k2.7-code": {
+          "name": "kimi-k2.7-code",
+        },
+        "subscription.kimi-k3": {
+          "name": "kimi-k3",
+        },
+        "subscription.qwen3.8-max": {
+          "name": "qwen3.8-max",
+        },
+        "subscription.qwen3.7-plus": {
+          "name": "qwen3.7-plus",
+        },
+        "subscription.grok-4.5": {
+          "name": "grok-4.5",
+        },
+        "subscription.deepseek-v4-pro": {
+          "name": "deepseek-v4-pro",
+        },
+        "subscription.deepseek-v4-flash": {
+          "name": "deepseek-v4-flash",
+        },
+        "subscription.gpt-5.6-luna": {
+          "name": "gpt-5.6-luna",
+        },
+      },
+    },
+  },
+}

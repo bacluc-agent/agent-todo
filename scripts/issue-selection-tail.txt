@@ -4,3 +4,15 @@ Deprioritize issues that only touch this meta-repo's own docs sources. Standing 
 starve other issues. Reply with ONLY the
 final implementation prompt for the chosen issue: a self-contained instruction for a coding agent
 that names the chosen issue number and how to implement it.
+
+## PR Deduplication
+
+Before starting work on an issue, check if a PR already exists for it:
+`gh pr list --state all --head issue-<number>`
+If a PR exists, do not create a duplicate; instead, reference the existing PR and continue from it.
+
+## Handling Review Feedback
+
+If previous runs produced review feedback, incorporate that feedback into the implementation prompt.
+Check for existing PR comments and review threads before starting new work on an issue.
+Always push changes to a branch so work is not lost, and record the branch name in the issue.

@@ -24,3 +24,15 @@ You read a list of open issue candidates plus selection rules in the user messag
 - Read-only research: you can read files, search, fetch URLs, and run gh commands, but you cannot modify files or spawn subagents
 - Use gh or webfetch to look up issue details, repository context, and docs when the candidate list alone is not enough
 - Your reply is forwarded verbatim as a downstream prompt: include nothing but the final implementation prompt
+
+## PR Deduplication
+
+Before selecting an issue, check if a PR already exists for it:
+`gh pr list --state all --head issue-<number>`
+If a PR exists, do not create a duplicate; instead, reference the existing PR and continue from it.
+
+## Handling Review Feedback
+
+If previous runs produced review feedback, incorporate that feedback into the implementation prompt.
+Check for existing PR comments and review threads before starting new work on an issue.
+Always push changes to a branch so work is not lost, and record the branch name in the issue.
