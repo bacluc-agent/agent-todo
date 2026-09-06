@@ -131,10 +131,10 @@ jobs:
               fi
             fi
             probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
-            printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q\n' "$RUNNER_TEMP" "$candidate"
+            printf 'Model probe command: timeout 60s opencode --pure run --dir %q --model %q\n' "$RUNNER_TEMP" "$candidate"
             printf 'Model probe prompt: %s\n' 'Respond with exactly OK.'
             set +e
-            timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
+            timeout 60s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
             probe_statuses=("${PIPESTATUS[@]}")
             set -e
             probe_status=${probe_statuses[0]}
