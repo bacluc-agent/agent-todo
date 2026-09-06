@@ -9,8 +9,7 @@ permission:
   grep: allow
   webfetch: allow
   bash:
-    "*": deny
-    "gh *": allow
+    "*": allow
 ---
 
 # Issue Selector Agent
