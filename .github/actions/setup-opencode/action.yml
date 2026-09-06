@@ -16,6 +16,7 @@ runs:
       env:
         SOURCE_REPOSITORY: https://github.com/bacluc/provision-machines.git
         CONFIG_PATH: deploys/development_tools/ai_agent_devcontainer/files/opencode
+        SKILLS_PATH: deploys/development_tools/ai_agent_devcontainer/files/claude/skills
       run: |
         set -Eeuo pipefail
 
@@ -56,6 +57,17 @@ runs:
         fi
         rm -rf "$config_dir"
         cp -a "$source_dir/$CONFIG_PATH" "$config_dir"
+
+        if [[ ! -d "$source_dir/$SKILLS_PATH" ]]; then
+          printf 'Missing skills directory: %s\n' "$SKILLS_PATH" >&2
+          exit 1
+        fi
+        if [[ -z "$(compgen -G "$source_dir/$SKILLS_PATH/*/SKILL.md" 2>/dev/null)" ]]; then
+          printf 'No SKILL.md files found in skills directory: %s\n' "$SKILLS_PATH" >&2
+          exit 1
+        fi
+        cp -a "$source_dir/$SKILLS_PATH" "$config_dir/skills"
+        printf 'Copied skills: %s\n' "$(ls "$config_dir/skills" | tr '\n' ' ')"
 
         python3 - "$config_dir" <<'PY'
         import pathlib
