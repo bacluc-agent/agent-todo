@@ -11,6 +11,18 @@ permission:
   bash:
     "*": deny
     "gh *": allow
+    "git log *": allow
+    "git status": allow
+    "git diff *": allow
+    "git show *": allow
+    "pwd": allow
+    "ls *": allow
+    "cat *": allow
+    "head *": allow
+    "tail *": allow
+    "grep *": allow
+    "base64 *": allow
+    "echo *": allow
 ---
 
 # Issue Selector Agent
