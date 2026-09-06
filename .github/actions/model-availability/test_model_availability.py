@@ -10,10 +10,21 @@ class TestParseFreeModels:
             "opencode/big-pickle\n"
             "opencode/ling-3.0-flash-fin-free\n"
             "opencode/mimo-v2.5-free\n"
+            "custom-provider/other-free\n"
+            "custom-provider/big-pickle\n"
+            "standalone-free\n"
+            "big-pickle\n"
+            "opencode/paid-model\n"
+            "other/paid-model\n"
         )
         assert model_availability.parse_free_models(output) == [
+            "big-pickle",
+            "custom-provider/big-pickle",
+            "custom-provider/other-free",
+            "opencode/big-pickle",
             "opencode/ling-3.0-flash-fin-free",
             "opencode/mimo-v2.5-free",
+            "standalone-free",
         ]
 
     def test_deduplicates(self):
