@@ -43,6 +43,7 @@ Every piece of work happens on an isolated branch off the upstream main branch, 
 ALWAYS COMMIT YOUR CHANGES. THIS WAY THEY ARE VISIBLE IN THE REPOSITORY, ALSO IN OTHER WORKTREES.
 IF YOUR CHANGES FIT TO THE PREVIOUS COMMIT, AMEND AND UPDATE THE COMMIT MESSAGE ACCORDINGLY.
 If the coordinator already instructed you to create the branch and you have done so, do not recreate it - just confirm you are on the right branch and continue implementing.
+
 - ALWAYS PUSH YOUR CHANGES to the remote branch after committing.
 - ALWAYS CREATE A PULL REQUEST against main when your implementation is complete. Use `gh pr create --base main --head <branch> --title "<descriptive title>" --body "Closes #<issue-number>"`. If a PR already exists for the branch, update it instead with `gh pr edit`.
 
