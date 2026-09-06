@@ -112,31 +112,11 @@ jobs:
           printf 'Choosing model...\n'
           printf '\n\n\n\n\n\n'
 
-          available_models="$RUNNER_TEMP/opencode-models.out"
-          printf '%s\n' 'Model availability command: opencode models'
-          set +e
-          run_opencode_with_timeout models 2>&1 | tee "$available_models"
-          available_statuses=("${PIPESTATUS[@]}")
-          available_command_status=${available_statuses[0]}
-          available_tee_status=${available_statuses[1]}
-          set -e
-          printf 'Model availability statuses: opencode=%s tee=%s\n' "$available_command_status" "$available_tee_status"
-          if ((available_tee_status != 0)); then
-            exit "$available_tee_status"
-          fi
-          if ((available_command_status != 0)); then
-            printf '%s\n' 'Unable to verify model availability: opencode models failed.' >&2
-            exit "$available_command_status"
-          fi
-
           fallback_model=''
           if [[ -n "$AVAILABLE_MODELS" ]]; then
             mapfile -t verified_models < <(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF')
             for candidate in "${verified_models[@]}"; do
-              if probe_model "$candidate"; then
-                fallback_model="$candidate"
-                break
-              fi
+              fallback_model="$candidate"
             done
           fi
           if [[ -z "$fallback_model" && -z "${REQUESTED_MODEL:-}" ]]; then
