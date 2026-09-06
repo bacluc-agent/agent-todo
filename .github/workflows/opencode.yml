@@ -239,6 +239,12 @@ jobs:
           if [[ "$resolution" == available ]]; then
             printf 'Model availability: requested %q is available; resolved model %q\n' "$requested_model" "$resolved"
             model="$resolved"
+            if [[ -n "${REQUESTED_MODEL:-}" ]]; then
+              if ! probe_model "$model"; then
+                printf 'Error: user-supplied model %q resolved as available but failed the live probe. Aborting.\n' "$model" >&2
+                exit 1
+              fi
+            fi
           else
             printf 'Model availability: requested %q is unavailable (%s)\n' "$requested_model" "$resolution"
             if [[ "$resolution" == ambiguous ]]; then
