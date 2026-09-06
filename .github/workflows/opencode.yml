@@ -241,6 +241,11 @@ jobs:
             model="$resolved"
           else
             printf 'Model availability: requested %q is unavailable (%s)\n' "$requested_model" "$resolution"
+            if [[ -n "${REQUESTED_MODEL:-}" ]]; then
+              printf 'Error: user-supplied model %q is not available. Available models listed above. Aborting.\n' "$requested_model" >&2
+              printf 'Model availability: user-supplied model %q is not available (%s); not falling back.\n' "$requested_model" "$resolution" >&2
+              exit 1
+            fi
             if [[ "$resolution" == ambiguous ]]; then
               printf 'Model resolution: ambiguous matches for %q: %s\n' "$requested_model" "$resolved" >&2
             fi
