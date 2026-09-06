@@ -26,9 +26,9 @@ def trunc(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "...[truncated]"
 
 
-def render_transcript(session: dict, session_id: str) -> list[str]:
+def render_transcript(session: dict, session_id: str, label: str = "Subagent transcript") -> list[str]:
     agent = (session.get("info") or {}).get("agent") or "subagent"
-    lines = [f"--- Subagent transcript: {agent} ({session_id}) ---"]
+    lines = [f"--- {label}: {agent} ({session_id}) ---"]
     for message in session.get("messages") or []:
         for part in message.get("parts") or []:
             if part.get("type") == "text" and len(part.get("text") or "") > 0:
@@ -90,20 +90,29 @@ def main() -> int:
         root_export = json.loads(run_opencode("export", root_id))
         child_ids = child_session_ids(root_export)
     except Exception:
+        root_export = None
         child_ids = []
-    if not child_ids:
-        print("Coordinator run used no subagents.")
-        return 0
 
     token = secrets.token_hex(32)
     print(f"::stop-commands::{token}")
-    for child_id in child_ids:
-        try:
-            child_export = json.loads(run_opencode("export", child_id))
-            for line in render_transcript(child_export, child_id):
-                print(line)
-        except Exception:
-            continue
+
+    if root_export is not None:
+        for line in render_transcript(root_export, root_id, label="Coordinator transcript"):
+            print(line)
+    else:
+        print("--- Coordinator transcript: export failed ---")
+
+    if not child_ids:
+        print("(No subagents were spawned.)")
+    else:
+        for child_id in child_ids:
+            try:
+                child_export = json.loads(run_opencode("export", child_id))
+                for line in render_transcript(child_export, child_id):
+                    print(line)
+            except Exception:
+                continue
+
     print(f"::{token}::")
     return 0
 
