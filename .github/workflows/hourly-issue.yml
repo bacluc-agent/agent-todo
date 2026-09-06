@@ -95,6 +95,8 @@ jobs:
             printf 'Unable to verify model availability; not dispatching.\n' >&2
             exit "$availability_status"
           fi
+          # Fetch model availability cache from issue #49
+          cache_json=$(gh issue view 49 --json body --jq '.body' 2>/dev/null || echo '{}')
           selection_model=''
           mapfile -t free_models < <(grep -Eo 'opencode/[^[:space:]]+-free' "$available_models" | awk '!seen[$0]++')
           for candidate in \
@@ -111,6 +113,23 @@ jobs:
               opencode/*-free) ;;
               *) continue ;;
             esac
+            # Check cache for this candidate
+            cache_entry=$(echo "$cache_json" | jq -r --arg model "$candidate" '.[$model] // empty')
+            if [[ -n "$cache_entry" ]]; then
+              cache_ok=$(echo "$cache_entry" | jq -r '.ok')
+              cache_checked=$(echo "$cache_entry" | jq -r '.checked')
+              cache_time=$(date -d "$cache_checked" +%s 2>/dev/null || echo 0)
+              current_time=$(date +%s)
+              age_hours=$(( (current_time - cache_time) / 3600 ))
+              if (( age_hours < 2 )); then
+                if [[ "$cache_ok" == "true" ]]; then
+                  selection_model="$candidate"
+                  break
+                else
+                  continue
+                fi
+              fi
+            fi
             probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
             printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q\n' "$RUNNER_TEMP" "$candidate"
             printf 'Model probe prompt: %s\n' 'Respond with exactly OK.'
@@ -122,9 +141,12 @@ jobs:
             probe_tee_status=${probe_statuses[1]}
             printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$probe_tee_status"
             probe_text="$(< "$probe_output")"
-            if (( probe_status == 0 && probe_tee_status == 0 )) && [[ "$probe_text" =~ ^[[:space:]]*OK\.?[[:space:]]*$ ]]; then
-              selection_model="$candidate"
-              break
+            if (( probe_status == 0 && probe_tee_status == 0 )) && printf '%s' "$probe_text" | grep -qE '^[[:space:]]*OK\.?[[:space:]]*$'; then
+                selection_model="$candidate"
+                # Update cache with successful probe result
+                new_cache=$(echo "$cache_json" | jq --arg model "$candidate" --arg checked "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {($model): {"ok": true, "checked": $checked}}')
+                gh issue edit 49 --body "$new_cache"
+                break
             fi
           done
           if [[ -z "$selection_model" ]]; then
