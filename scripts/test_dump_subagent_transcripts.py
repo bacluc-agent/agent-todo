@@ -244,7 +244,6 @@ class TestRunOpencode:
             return SimpleNamespace(stdout="out")
 
         monkeypatch.setattr(dump_subagent_transcripts.subprocess, "run", fake_run)
-        monkeypatch.setenv("OPENCODE_AUTH_CONTENT", "auth")
         assert dump_subagent_transcripts.run_opencode("export", "ses_x") == "out"
         assert len(calls) == 1
         command, kwargs = calls[0]
@@ -252,7 +251,6 @@ class TestRunOpencode:
         assert kwargs["check"] is True
         assert kwargs["capture_output"] is True
         assert kwargs["text"] is True
-        assert kwargs["env"]["OPENCODE_AUTH_CONTENT"] == "auth"
 
     def test_raises_on_failure(self, monkeypatch):
         def fake_run(command, **kwargs):

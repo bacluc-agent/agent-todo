@@ -9,8 +9,6 @@ import sys
 
 def run_opencode(*args) -> str:
     env = dict(os.environ)
-    if not env.get("OPENCODE_AUTH_CONTENT"):
-        env.pop("OPENCODE_AUTH_CONTENT", None)
     return subprocess.run(
         ["opencode", *args], check=True, capture_output=True, text=True, env=env
     ).stdout

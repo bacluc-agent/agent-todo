@@ -65,27 +65,13 @@ jobs:
           printf '::add-mask::%s\n' "$GITHUB_TOKEN"
           printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
           printf '::add-mask::%s\n' "$OPENCODE_GO_2_API_KEY"
-          copilot_auth_content=''
-          if [[ -n "${BACLUC_AGENT_GITHUB_TOKEN:-}" ]]; then
-            printf '::add-mask::%s\n' "$BACLUC_AGENT_GITHUB_TOKEN"
-            copilot_auth_content="$(python3 -c 'import json, sys; token = sys.stdin.read().rstrip(); print(json.dumps({"github-copilot": {"type": "oauth", "refresh": token, "access": token}}, separators=(",", ":")))' <<<"$BACLUC_AGENT_GITHUB_TOKEN")"
-            printf '::add-mask::%s\n' "$copilot_auth_content"
-          fi
 
           run_opencode() {
-            if [[ -n "$copilot_auth_content" ]]; then
-              OPENCODE_AUTH_CONTENT="$copilot_auth_content" opencode "$@"
-            else
-              opencode "$@"
-            fi
+            opencode "$@"
           }
 
           run_opencode_with_timeout() {
-            if [[ -n "$copilot_auth_content" ]]; then
-              OPENCODE_AUTH_CONTENT="$copilot_auth_content" timeout 10m opencode "$@"
-            else
-              timeout 10m opencode "$@"
-            fi
+            timeout 10m opencode "$@"
           }
 
           probe_model() {
@@ -94,11 +80,7 @@ jobs:
             printf 'Model probe command: timeout 10s opencode --pure run --dir %q --model %q\n' "$RUNNER_TEMP" "$candidate"
             printf 'Model probe prompt: %s\n' 'Respond with exactly OK.'
             set +e
-            if [[ -n "$copilot_auth_content" ]]; then
-              OPENCODE_AUTH_CONTENT="$copilot_auth_content" timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
-            else
-              timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
-            fi
+            timeout 10s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
             statuses=("${PIPESTATUS[@]}")
             set -e
             probe_status=${statuses[0]}
@@ -173,11 +155,7 @@ jobs:
               'Output exactly one line: CARRIERS: coordinator: provider/model')"
             printf 'Model discovery prompt:\n%s\n' "$discovery_prompt"
             set +e
-            if [[ -n "$copilot_auth_content" ]]; then
-              OPENCODE_AUTH_CONTENT="$copilot_auth_content" timeout 5m opencode run --agent model-discovery --model "$fallback_model" "$discovery_prompt" 2> >(tee "${discovery_output}.stderr" >&2) | tee "$discovery_output"
-            else
-              timeout 5m opencode run --agent model-discovery --model "$fallback_model" "$discovery_prompt" 2> >(tee "${discovery_output}.stderr" >&2) | tee "$discovery_output"
-            fi
+            timeout 5m opencode run --agent model-discovery --model "$fallback_model" "$discovery_prompt" 2> >(tee "${discovery_output}.stderr" >&2) | tee "$discovery_output"
             discovery_statuses=("${PIPESTATUS[@]}")
             discovery_status=${discovery_statuses[0]}
             discovery_tee_status=${discovery_statuses[1]}
@@ -280,7 +258,7 @@ jobs:
           printf 'Coordinator statuses: opencode=%s tee=%s\n' "$coordinator_status" "$coordinator_tee_status"
 
           # Dump subagent transcripts (issue #21)
-          COORDINATOR_SESSION_TITLE="$coordinator_session_title" OPENCODE_AUTH_CONTENT="$copilot_auth_content" python3 scripts/dump_subagent_transcripts.py || true
+          COORDINATOR_SESSION_TITLE="$coordinator_session_title" python3 scripts/dump_subagent_transcripts.py || true
           if ((coordinator_status != 0)); then
             exit "$coordinator_status"
           fi
