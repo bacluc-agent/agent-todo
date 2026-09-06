@@ -92,42 +92,15 @@ jobs:
           printf '::add-mask::%s\n' "$OPENCODE_GO_API_KEY"
           printf '::add-mask::%s\n' "$OPENCODE_GO_2_API_KEY"
 
-          run_opencode() {
-            opencode "$@"
-          }
-
-          run_opencode_with_timeout() {
-            timeout 10m opencode "$@"
-          }
-
-          probe_model() {
-            local candidate="$1" probe_output statuses probe_status tee_status
-            probe_output="$RUNNER_TEMP/model-probe-${candidate//\//-}.out"
-            printf 'Model probe command: timeout 60s opencode --pure run --dir %q --model %q\n' "$RUNNER_TEMP" "$candidate"
-            printf 'Model probe prompt: %s\n' 'Respond with exactly OK.'
-            set +e
-            timeout 60s opencode --pure run --dir "$RUNNER_TEMP" --model "$candidate" 'Respond with exactly OK.' 2> >(tee "${probe_output}.stderr" >&2) | tee "$probe_output"
-            statuses=("${PIPESTATUS[@]}")
-            set -e
-            probe_status=${statuses[0]}
-            tee_status=${statuses[1]}
-            printf 'Model probe statuses: opencode=%s tee=%s\n' "$probe_status" "$tee_status"
-            probe_text="$(sed $'s/\033\\[[0-9;]*[[:alpha:]]//g' "$probe_output")"
-            if ((probe_status == 0 && tee_status == 0)) && grep -Eq '^[[:space:]]*OK\.?[[:space:]]*$' <<<"$probe_text"; then
-              return 0
-            fi
-            ((probe_status == 0 && tee_status == 0)) && [[ "$(< "$probe_output")" =~ ^OK[[:space:]]*\.?[[:space:]]*$ ]]
-          }
+          available_models_file="$RUNNER_TEMP/available-models.txt"
+          printf '%s\n' "$AVAILABLE_MODELS" > "$available_models_file"
           printf '\n\n\n\n\n\n'
           printf 'Choosing model...\n'
           printf '\n\n\n\n\n\n'
 
           fallback_model=''
           if [[ -n "$AVAILABLE_MODELS" ]]; then
-            mapfile -t verified_models < <(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF')
-            for candidate in "${verified_models[@]}"; do
-              fallback_model="$candidate"
-            done
+            fallback_model="$(printf '%s\n' "$AVAILABLE_MODELS" | awk 'NF' | head -n 1)"
           fi
           if [[ -z "$fallback_model" && -z "${REQUESTED_MODEL:-}" ]]; then
             printf '%s\n' 'No coordinator fallback model is available; not dispatching.' >&2
@@ -139,7 +112,11 @@ jobs:
           if [[ -z "$model" ]]; then
             discovery_output="$RUNNER_TEMP/model-discovery.out"
             discovery_prompt="$(printf '%s\n' \
-              'Run opencode models. Follow your instructions to pick one available, verified model suitable for the user task, preferring free models. Do not do the task itself.' \
+              'The following models are already verified available (free models first, then paid Go models):' \
+              '<available-models>' \
+              "$AVAILABLE_MODELS" \
+              '</available-models>' \
+              'Pick one of these models suitable for the user task, preferring free models. Do not run opencode models, do not probe models, and do not check providers: availability is already verified.' \
               '<user-task>' \
               "$PROMPT" \
               '</user-task>' \
@@ -161,7 +138,7 @@ jobs:
               model="$fallback_model"
             else
               model="$({ grep -oE 'coordinator: [^,[:space:]]+' "$discovery_output" || true; } | tail -n 1 | cut -d' ' -f2-)"
-              if [[ -z "$model" ]] || ! grep -Fxq "$model" "$AVAILABLE_MODELS"; then
+              if [[ -z "$model" ]] || ! grep -Fxq "$model" "$available_models_file"; then
                 printf 'Model discovery returned no usable available model; falling back to the verified model %q.\n' "$fallback_model"
                 model="$fallback_model"
               fi
@@ -171,7 +148,7 @@ jobs:
           fi
 
           resolve_model() {
-            python3 - "$1" "$AVAILABLE_MODELS" <<'PY'
+            python3 - "$1" "$available_models_file" <<'PY'
           import re
           import sys
 
@@ -217,12 +194,6 @@ jobs:
           if [[ "$resolution" == available ]]; then
             printf 'Model availability: requested %q is available; resolved model %q\n' "$requested_model" "$resolved"
             model="$resolved"
-            if [[ -n "${REQUESTED_MODEL:-}" ]]; then
-              if ! probe_model "$model"; then
-                printf 'Error: user-supplied model %q resolved as available but failed the live probe. Aborting.\n' "$model" >&2
-                exit 1
-              fi
-            fi
           else
             printf 'Model availability: requested %q is unavailable (%s)\n' "$requested_model" "$resolution"
             if [[ "$resolution" == ambiguous ]]; then
