@@ -15,10 +15,6 @@ on:
         description: Optional OpenCode model override (e.g. opencode-go-openai/glm-5.2)
         required: false
         type: string
-      timeout_minutes:
-        description: Per-PR job timeout in minutes
-        required: false
-        type: number
 
 permissions:
   actions: write
@@ -148,5 +144,4 @@ jobs:
     with:
       prompt: ${{ fromJson(needs.find-prs.outputs.pr_metadata)[matrix.pr].prompt }}
       model: ${{ inputs.model }}
-      timeout_minutes: ${{ inputs.timeout_minutes || null }}
     secrets: inherit
