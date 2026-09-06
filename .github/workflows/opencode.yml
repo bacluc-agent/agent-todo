@@ -62,12 +62,33 @@ jobs:
       - name: Set up OpenCode
         uses: ./.github/actions/setup-opencode
 
+      - name: Get model availability cache
+        id: get-cache
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          cache_json=$(gh issue view 49 --json body --jq '.body' 2>/dev/null || echo '{}')
+          {
+            printf 'cache<<CACHE_EOF\n'
+            printf '%s\n' "$cache_json"
+            printf 'CACHE_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check model availability
+        id: model-availability
+        uses: ./.github/actions/model-availability
+        with:
+          cache-json: ${{ steps.get-cache.outputs.cache }}
+
       - name: Select model
         id: select-model
         shell: bash
         env:
           PROMPT: ${{ inputs.prompt }}
           REQUESTED_MODEL: ${{ inputs.model }}
+          AVAILABLE_MODELS: ${{ steps.model-availability.outputs.available-models }}
           GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
           BACLUC_AGENT_GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
         run: |
@@ -125,33 +146,10 @@ jobs:
           fi
 
           fallback_model=''
-          mapfile -t free_models < <(grep -E '^opencode/[^[:space:]]+-free$' "$available_models" | awk '!seen[$0]++')
-          for candidate in "${free_models[@]}"; do
-            if probe_model "$candidate"; then
-              fallback_model="$candidate"
-              break
-            fi
-          done
-          if [[ -z "$fallback_model" ]]; then
-            printf '%s\n' 'No verified free OpenCode model is available; checking paid Qwen fallback.'
+          if [[ -n "$AVAILABLE_MODELS" ]]; then
+            fallback_model="$(printf '%s\n' "$AVAILABLE_MODELS" | head -n 1)"
           fi
           if [[ -z "$fallback_model" ]]; then
-          for candidate in \
-            'opencode-go-openai/qwen3.8-flash' \
-            'opencode-go-openai-2/qwen3.8-flash'; do
-            if grep -Fxq "$candidate" "$available_models"; then
-              case "$candidate" in
-                opencode-go-openai/qwen3.8-flash) [[ -n "$OPENCODE_GO_API_KEY" ]] || continue ;;
-                opencode-go-openai-2/qwen3.8-flash) [[ -n "$OPENCODE_GO_2_API_KEY" ]] || continue ;;
-              esac
-              if probe_model "$candidate"; then
-                fallback_model="$candidate"
-                break
-              fi
-            fi
-          done
-          fi
-          if [[ -z "$fallback_model" && -z "${REQUESTED_MODEL:-}" ]]; then
             printf '%s\n' 'No coordinator fallback model is available; not dispatching.' >&2
             exit 1
           fi
@@ -250,17 +248,8 @@ jobs:
             if [[ "$resolution" == ambiguous ]]; then
               printf 'Model resolution: ambiguous matches for %q: %s\n' "$requested_model" "$resolved" >&2
             fi
-            printf 'Model fallback: using %q\n' "$fallback_model"
-            IFS=$'\t' read -r fallback_resolution fallback_resolved < <(resolve_model "$fallback_model")
-            if [[ "$fallback_resolution" != available ]]; then
-              printf 'Model availability: fallback requested %q is unavailable (%s); cannot run coordinator.\n' "$fallback_model" "$fallback_resolution" >&2
-              if [[ "$fallback_resolution" == ambiguous ]]; then
-                printf 'Model resolution: ambiguous fallback matches for %q: %s\n' "$fallback_model" "$fallback_resolved" >&2
-              fi
-              exit 1
-            fi
-            printf 'Model availability: fallback requested %q is available; resolved model %q\n' "$fallback_model" "$fallback_resolved"
-            model="$fallback_resolved"
+            printf 'Model fallback: using action-verified model %q\n' "$fallback_model"
+            model="$fallback_model"
           fi
           printf '\n\n\n\n\n\n'
           printf 'Chosen model is %s\n' "$model"
@@ -301,6 +290,20 @@ jobs:
             exit "$coordinator_status"
           fi
           exit "$coordinator_tee_status"
+
+      - name: Update cache on coordinator failure
+        if: failure() && steps.select-model.outputs.model != ''
+        shell: bash
+        env:
+          MODEL: ${{ steps.select-model.outputs.model }}
+          GITHUB_TOKEN: ${{ secrets.BACLUC_AGENT_GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          cache_json=$(gh issue view 49 --json body --jq '.body' 2>/dev/null || echo '{}')
+          checked="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          new_cache=$(echo "$cache_json" | jq --arg model "$MODEL" --arg checked "$checked" \
+            '. + {($model): {"ok": false, "checked": $checked}}')
+          gh issue edit 49 --body "$new_cache" || true
 
       - name: Dump debug output
         if: always()
