@@ -265,6 +265,7 @@ jobs:
           fi
 
           coordinator_session_title='coordinator-run'
+          PROMPT=$(printf 'model: %s \n %s' "$model" "$PROMPT")
           printf 'Final coordinator command: opencode run --agent coordinator --model %q --title %q\n' "$model" "$coordinator_session_title"
           stop_token="$(openssl rand -hex 8)"
           printf '::stop-commands::%s\n' "$stop_token"
