@@ -87,6 +87,7 @@ runs:
                     and path.stem.lower() != "model-discovery":
                 path.write_text(path.read_text() + instruction)
 
+        # ponytail: compatibility shim for the tagged opencode.jsonc; delete once a provision-machines release tag contains the {env:OPENCODE_GO_API_KEY} refs (issue #28)
         config = root / "opencode.jsonc"
         text = config.read_text()
         pattern = re.compile(
@@ -94,13 +95,17 @@ runs:
             r'"options"\s*:\s*\{)(.*?)(\}\s*,\s*"models")',
             re.DOTALL,
         )
+        injected = 0
         def add_api_key(match):
+            global injected
             key = "OPENCODE_GO_2_API_KEY" if match.group(2) else "OPENCODE_GO_API_KEY"
+            if '"apiKey"' in match.group(3):
+                return match.group(0)
+            injected += 1
             return f'{match.group(1)}\n        "apiKey": "{{env:{key}}}",{match.group(3)}{match.group(4)}'
 
-        text, count = pattern.subn(add_api_key, text)
-        if count != 4:
-            raise SystemExit(f"Expected four OpenCode Go providers, found {count}")
+        text = pattern.sub(add_api_key, text)
+        print(f"Injected apiKey into {injected} opencode-go-* provider(s)")
         config.write_text(text)
 
         discovery = root / "agents" / "model-discovery.md"
