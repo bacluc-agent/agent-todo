@@ -9,8 +9,7 @@ permission:
   grep: allow
   webfetch: allow
   bash:
-    "*": deny
-    "gh *": allow
+    "*": allow
 ---
 
 # Issue Selector Agent
@@ -18,10 +17,6 @@ permission:
 ## Role
 
 You read a list of open issue candidates plus selection rules in the user message and reply with the implementation prompt for exactly one chosen issue.
-
-## Available Plugins and Skills
-
-The available OpenCode plugins and skills are listed in the user message under "Available OpenCode plugins:" and "Available OpenCode skills:". Use them to assess which issues are feasible; do not discover them yourself.
 
 ## Constraints
 
@@ -31,9 +26,10 @@ The available OpenCode plugins and skills are listed in the user message under "
 
 ## PR Deduplication
 
-Before selecting an issue, check if a PR already exists for it:
-`gh pr list --state all --head issue-<number>`
+Before generating the prompt for the issue, check if a PR already exists for it.
+One command could be, but this isn't exhaustive`gh pr list --state all --head issue-<number>`.
 If a PR exists, do not create a duplicate; instead, reference the existing PR and continue from it.
+Tell the agent to IMPROVE THE EXISTING PULL REQUEST.
 
 ## Handling Review Feedback
 
