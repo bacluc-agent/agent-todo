@@ -1,7 +1,54 @@
 import json
+import types
 from datetime import datetime, timezone
 
 import model_availability
+
+
+class TestDiscoverModels:
+    def test_v1_models_request_uses_curl_user_agent(self, monkeypatch):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"data": [{"id": "glm-5.2"}]}'
+
+        def fake_urlopen(request, timeout=30):
+            captured["headers"] = request.headers
+            return FakeResponse()
+
+        monkeypatch.setattr(model_availability.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            model_availability.subprocess,
+            "run",
+            lambda *args, **kwargs: types.SimpleNamespace(stdout="opencode/a-free\n"),
+        )
+        free_models, go_model_ids = model_availability.discover_models()
+        assert captured["headers"]["User-agent"] == "curl/8.5.0"
+        assert not any("Python-urllib" in v for v in captured["headers"].values())
+        assert any(k.lower() == "x-opencode-session" for k in captured["headers"])
+        assert go_model_ids == ["glm-5.2"]
+        assert free_models == ["opencode/a-free"]
+
+    def test_returns_free_models_when_endpoint_fails(self, monkeypatch):
+        def fail(request, timeout=30):
+            raise RuntimeError("403 Forbidden")
+
+        monkeypatch.setattr(model_availability.urllib.request, "urlopen", fail)
+        monkeypatch.setattr(
+            model_availability.subprocess,
+            "run",
+            lambda *args, **kwargs: types.SimpleNamespace(stdout="opencode/a-free\n"),
+        )
+        free_models, go_model_ids = model_availability.discover_models()
+        assert free_models == ["opencode/a-free"]
+        assert go_model_ids == []
 
 
 class TestParseFreeModels:

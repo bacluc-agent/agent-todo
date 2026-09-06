@@ -73,12 +73,16 @@ def discover_models() -> tuple[list[str], list[str]]:
     try:
         session_id = os.urandom(16).hex()
         request = urllib.request.Request(
-            MODELS_ENDPOINT, headers={"x-opencode-session": session_id}
+            MODELS_ENDPOINT,
+            headers={
+                "x-opencode-session": session_id,
+                "User-Agent": "curl/8.5.0",
+            },
         )
         with urllib.request.urlopen(request, timeout=30) as response:
             go_model_ids = parse_go_model_ids(response.read().decode())
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"warning: failed to discover Go provider models: {e}", file=sys.stderr)
     return free_models, go_model_ids
 
 
